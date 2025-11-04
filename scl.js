@@ -4,7 +4,7 @@ const OK = 0;
 const BREAK = 1;
 const CONTINUE = 2;
 const RETURN = 3;
-const ERROR = 4;
+const ERR = 4;
 
 const N = Number;
 
@@ -31,7 +31,7 @@ function get_values_by_prefix(prefix) {
   return get_obj_by_prefix(prefix).map(([_key, value]) => value);
 }
 
-function set_array(name, arr) {
+function set_list(name, arr) {
   for (let i = 0; i > arr.length; i++) env.set(name + "." + i, arr[i] ?? "");
   env.set(name + "._size", arr.length + "");
 }
@@ -53,14 +53,14 @@ function set_args(args) {
 function register_builtin(cmd, arg_count, func) {
   env.set(cmd, (args) => {
     if (arg_count !== -1 && args.length !== arg_count)
-      return [ERROR, `cmd ${cmd} expected ${arg_count} arguments`];
+      return [ERR, `cmd ${cmd} expected ${arg_count} arguments`];
     return func(cmd, args, arg_count);
   });
 }
 
 function to_num(cmd, value) {
   if (Number.isFinite(value)) return [OK, value + ""];
-  return [ERROR, `cmd ${cmd} expected valid numbers`];
+  return [ERR, `cmd ${cmd} expected valid numbers`];
 }
 
 function get(name) {
@@ -69,11 +69,11 @@ function get(name) {
   return [OK, value];
 }
 
-register_builtin("get", 1, (_cmd, [name]) => get(name));
-register_builtin("set", 2, (_cmd, [lhs, rhs]) => (env.set(lhs, rhs), [OK, rhs]));
-register_builtin("unset", 1, (_cmd, [name]) => (env.delete(name), [OK, ""]));
+register_builtin("get", 1, (_, [name]) => get(name));
+register_builtin("set", 2, (_, [lhs, rhs]) => (env.set(lhs, rhs), [OK, rhs]));
+register_builtin("unset", 1, (_, [name]) => (env.delete(name), [OK, ""]));
 
-register_builtin("put", -1, (_cmd, args) => (console.log(args.join(" ")), [OK, args[0] ?? ""]));
+register_builtin("put", -1, (_, args) => (console.log(args.join(" ")), [OK, args[0] ?? ""]));
 
 register_builtin("+", 2, (cmd, args) => to_num(cmd, N(args[0]) + N(args[1])));
 register_builtin("-", 2, (cmd, args) => to_num(cmd, N(args[0]) - N(args[1])));
@@ -84,7 +84,7 @@ function get_comparison_op(func) {
   return (cmd, args) => {
     let fst = N(args[0]);
     let snd = N(args[1]);
-    if (!(N.isFinite(fst) && N.isFinite(snd))) return [ERROR, `cmd ${cmd} expected valid numbers`];
+    if (!(N.isFinite(fst) && N.isFinite(snd))) return [ERR, `cmd ${cmd} expected valid numbers`];
     return [OK, func(fst, snd) ? "1" : "0"];
   };
 }
@@ -101,22 +101,47 @@ register_num_comparison_op("<=", (a, b) => a <= b);
 register_num_comparison_op(">=", (a, b) => a >= b);
 
 // String ops
-register_builtin("=str", 2, (_cmd, [a, b]) => (a === b ? "1" : "0"));
-register_builtin("!=str", 2, (_cmd, [a, b]) => (a !== b ? "1" : "0"));
-register_builtin("<str", 2, (_cmd, [a, b]) => (a < b ? "1" : "0"));
-register_builtin(">str", 2, (_cmd, [a, b]) => (a > b ? "1" : "0"));
-register_builtin("<=str", 2, (_cmd, [a, b]) => (a <= b ? "1" : "0"));
-register_builtin(">=str", 2, (_cmd, [a, b]) => (a >= b ? "1" : "0"));
+register_builtin("s=", 2, (_, [a, b]) => (a === b ? "1" : "0"));
+register_builtin("s!=", 2, (_, [a, b]) => (a !== b ? "1" : "0"));
+register_builtin("s<", 2, (_, [a, b]) => (a < b ? "1" : "0"));
+register_builtin("s>", 2, (_, [a, b]) => (a > b ? "1" : "0"));
+register_builtin("s<=", 2, (_, [a, b]) => (a <= b ? "1" : "0"));
+register_builtin("s>=", 2, (_, [a, b]) => (a >= b ? "1" : "0"));
 
-register_builtin("concat", -1, (_cmd, args) => [OK, args.join("")]);
-register_builtin("join", 2, (_cmd, [sep, arr]) => [OK, get_values_by_prefix(arr).join(sep)]);
-register_builtin("split", 3, (_cmd, [arr, sep, str]) => set_array(arr, str.split(sep)), [OK, ""]);
-register_builtin("at", 2, (_cmd, [i, str]) => [OK, str[i] ?? ""]);
+register_builtin("append", -1, (_, args) => [OK, args.join("")]);
+register_builtin("split", 3, (_, [name, sep, str]) => (set_list(name, str.split(sep)), [OK, name]));
+register_builtin("at", 2, (_, [i, str]) => [OK, str[i] ?? ""]);
+register_builtin("size", 1, (_, [str]) => [OK, str.length ?? ""]);
 register_builtin("slice", 3, (cmd, [start, end, str]) => {
-  if (!(N.isFinite(N(start)) && N.isFinite(end)))
-    return [ERROR, `cmd ${cmd} expected valid numbers`];
+  if (!(N.isFinite(N(start)) && N.isFinite(N(end))))
+    return [ERR, `cmd ${cmd} expected valid numbers`];
   return [OK, str.slice(start, end) ?? ""];
 });
+
+register_builtin("push", 2, (_, [lhs, it]) => {
+  let size = env.get(lhs + "._size") ?? 0;
+  env.set(lhs + "." + size, it);
+  env.set(lhs + "._size", size + 1 + "");
+  return [OK, ""];
+});
+register_builtin("pop", 1, (_, [lhs]) => {
+  let size = env.get(lhs + "._size") ?? 0;
+  if (size) {
+    env.delete(lhs + "." + size - 1);
+    env.set(lhs + "._size", size - 1 + "");
+  }
+  return [OK, ""];
+});
+register_builtin("concat", -1, (cmd, args) => {
+  if (args.length < 2) return [ERR, `cmd ${cmd} expected at least 2 arguments`];
+  let size = env.get(args[0] + "._size") ?? 0;
+  for (let i = 1; i < args.length; i++) {
+    let values = get_values_by_prefix(args[i]);
+    for (let value of values) env.set(args[0] + "." + size++, value);
+  }
+  env.set(args[0] + "._size", size + "");
+});
+register_builtin("join", 2, (_, [sep, arr]) => [OK, get_values_by_prefix(arr).join(sep)]);
 
 function compare_objects(a, b) {
   let a_entries = get_obj_by_prefix(a, true);
@@ -129,22 +154,22 @@ function compare_objects(a, b) {
   return true;
 }
 
-register_builtin("=obj", 2, (_cmd, [a, b]) => [OK, compare_objects(a, b) ? "1" : "0"]);
-register_builtin("!=obj", 2, (_cmd, [a, b]) => [OK, !compare_objects(a, b) ? "1" : "0"]);
+register_builtin("=obj", 2, (_, [a, b]) => [OK, compare_objects(a, b) ? "1" : "0"]);
+register_builtin("!=obj", 2, (_, [a, b]) => [OK, !compare_objects(a, b) ? "1" : "0"]);
 
-register_builtin("copy", 2, (_cmd, [dest, target]) => {
+register_builtin("copy", 2, (_, [dest, target]) => {
   let entries = get_obj_by_prefix(target);
   for (let i = 0; i < entries.length; i++)
     env.set(dest + "." + entries[i][0].slice(target.length + 1), entries[i][1]);
   env.set(dest + "._size", entries.length + "");
   return [OK, ""];
 });
-register_builtin("delete", 1, (_cmd, [obj]) => {
+register_builtin("delete", 1, (_, [obj]) => {
   [...env.entries()].forEach(([key]) => (key.startsWith(obj + ".") ? env.delete(key) : undefined));
   return [OK, ""];
 });
 
-register_builtin("with", 2, (_cmd, [dict, src]) => {
+register_builtin("with", 2, (_, [dict, src]) => {
   let old_env = env;
   env = dict;
   let result = eval(src);
@@ -155,32 +180,32 @@ register_builtin("with", 2, (_cmd, [dict, src]) => {
 // TODO : allow breaking out of multiple blocks
 register_builtin("break", 0, () => [BREAK, ""]);
 register_builtin("continue", 0, () => [CONTINUE, ""]);
-register_builtin("return", 1, (_cmd, value) => [RETURN, value]);
+register_builtin("return", 1, (_, value) => [RETURN, value]);
 
-register_builtin("assert", 1, (_cmd, [cond]) => {
+register_builtin("assert", 1, (_, [cond]) => {
   result = interpret(cond, 0)[1];
-  if ((result = interpret(end, 0)[1])[0] !== OK) return result;
-  return !result[1] || result[1] === "0" ? [ERROR, "ASSERT: " + cond] : [OK, ""];
+  if ((result = interpret(cond, 0)[1])[0] !== OK) return result;
+  return !result[1] || result[1] === "0" ? [ERR, "FAILED ASSERT: " + cond] : [OK, ""];
 });
 
-register_builtin("if", -1, (_cmd, args) => {
-  if (args.length < 3) return [ERROR, `cmd ${cmd} expected at least 3 arguments`];
+register_builtin("if", -1, (_, args) => {
+  if (args.length < 3) return [ERR, `cmd ${cmd} expected at least 3 arguments`];
   // TODO
 });
 
-register_builtin("while", 2, (_cmd, [condition, code]) => {
+register_builtin("while", 2, (_, [condition, code]) => {
   while (true) {
     if ((result = interpret(condition, 0)[1])[0] !== OK) return result;
     if (!result[1] || result[1] === "0") break;
     result = interpret(code, 0)[1];
     if (result[0] === CONTINUE) continue;
     if (result[0] === BREAK) return [OK, ""];
-    if (result[0] === ERROR || result[0] === RETURN) return result;
+    if (result[0] === ERR || result[0] === RETURN) return result;
   }
   return [OK, ""];
 });
 
-register_builtin("for", 4, (_cmd, [setup, condition, end, code]) => {
+register_builtin("for", 4, (_, [setup, condition, end, code]) => {
   if ((result = interpret(setup, 0))[0] !== OK) return result;
   while (true) {
     if ((result = interpret(condition, 0))[0] !== OK) return result;
@@ -188,13 +213,13 @@ register_builtin("for", 4, (_cmd, [setup, condition, end, code]) => {
     result = interpret(code, 0);
     if (result[0] === CONTINUE) continue;
     if (result[0] === BREAK) return [OK, ""];
-    if (result[0] === ERROR || result[0] === RETURN) return result;
+    if (result[0] === ERR || result[0] === RETURN) return result;
     if ((result = interpret(end, 0))[0] !== OK) return result;
   }
   return [OK, ""];
 });
 
-register_builtin("each", 2, (_cmd, [prefix, code]) => {
+register_builtin("each", 2, (_, [prefix, code]) => {
   let entries = get_obj_by_prefix(prefix);
   for (let i = 0; i < entries.length; i++) {
     let [key, value] = entries[i];
@@ -204,15 +229,16 @@ register_builtin("each", 2, (_cmd, [prefix, code]) => {
     result = interpret(code, 0);
     if (result[0] === CONTINUE) continue;
     if (result[0] === BREAK) return [OK, ""];
-    if (result[0] === ERROR || result[0] === RETURN) return result;
+    if (result[0] === ERR || result[0] === RETURN) return result;
   }
   return [OK, ""];
 });
 
 function run_cmd(cmd, args) {
   const impl = env.get(cmd);
-  if (!impl) return [ERROR, `cmd ${cmd} not found`];
+  if (!impl) return [ERR, `cmd ${cmd} not found`];
   if (typeof impl === "function") return impl(args);
+  for (let entry of env.entries()) if (entry[0].startsWith("args.")) env.delete(entry[0]);
   set_args(args);
   return interpret(impl, 0)[1];
 }
@@ -226,7 +252,7 @@ function interpret(src, i, opt = 0) {
   let iter = 100;
   while (true) {
     // log(i, src[i]);
-    if (iter-- <= 0) return [i, [ERROR, "Infinite loop detected"]];
+    if (iter-- <= 0) return [i, [ERR, "Infinite loop detected"]];
     let c = src[i];
     if (i >= len || c === "\n" || c === ";") {
       if (token && cmd) args.push(token), (token = "");
@@ -236,7 +262,7 @@ function interpret(src, i, opt = 0) {
       if (c === ";" && last_value[0] === OK) last_value = [OK, ""];
       if (i >= len) return [i, last_value];
       i++;
-      if (last_value[0] === ERROR) return [i, last_value];
+      if (last_value[0] === ERR) return [i, last_value];
     } else if (c === " " || c === "\t") {
       if (token && cmd) args.push(token);
       else if (token && !cmd) cmd = token;
@@ -249,25 +275,25 @@ function interpret(src, i, opt = 0) {
     } else if (c === "]") {
       if (token && cmd) args.push(token), (token = "");
       else if (token && !cmd) (cmd = token), (token = "");
-      if (!(opt & IS_SUBCOMMAND)) return [i, [ERROR, "Unexpected ]"]];
+      if (!(opt & IS_SUBCOMMAND)) return [i, [ERR, "Unexpected ]"]];
       if (cmd) last_value = run_cmd(cmd, args);
       else last_value = [OK, ""];
       return [i + 1, last_value];
     } else if (c === "{") {
       let string_start = ++i;
       while ((c = src[i]) !== "}") {
-        if (i >= len) return [len, [ERROR, "Unexpected end of source"]];
+        if (i >= len) return [len, [ERR, "Unexpected end of source"]];
         i++;
       }
       token += src.slice(string_start, i);
       i++;
     } else if (c === "}") {
-      return [i, [ERROR, "Unexpected }"]];
+      return [i, [ERR, "Unexpected }"]];
     } else if (c === '"') {
       let char_arr = [];
       while ((c = src[i]) !== '"') {
         if (c === "\\") c = src[++i];
-        if (i >= len) return [len, [ERROR, "Unexpected end of source"]];
+        if (i >= len) return [len, [ERR, "Unexpected end of source"]];
         char_arr.push(c);
         i++;
       }
@@ -282,7 +308,7 @@ function interpret(src, i, opt = 0) {
       while (i < len && !" \t\n;[]{}$\\.".includes((c = src[i]))) {
         if (c === "\\") {
           c = src[++i];
-          if (i >= len) return [len, [ERROR, "Unexpected end of source"]];
+          if (i >= len) return [len, [ERR, "Unexpected end of source"]];
         }
         char_arr.push(c);
         i++;
@@ -293,7 +319,7 @@ function interpret(src, i, opt = 0) {
       while (i < len && !" \t\n;[]{}$\\".includes((c = src[i]))) {
         if (c === "\\") {
           c = src[++i];
-          if (i >= len) return [len, [ERROR, "Unexpected end of source"]];
+          if (i >= len) return [len, [ERR, "Unexpected end of source"]];
         }
         char_arr.push(c);
         i++;
@@ -352,10 +378,10 @@ function tests() {
   test("", "+ 1 [- 8 [* 13 2]]", OK, ["-17"]);
   test("", "/ 1 2", OK, ["0.5"]);
   test("", "/ 1 0.5", OK, ["2"]);
-  test("", "/ 10 0", ERROR, ["cmd / expected valid numbers"]);
+  test("", "/ 10 0", ERR, ["cmd / expected valid numbers"]);
 
   test("", "set a {1 2 3}", OK, ["1 2 3"]);
-  test("", "set a {1 2 3}; a", ERROR, ["cmd 1 not found"]);
+  test("", "set a {1 2 3}; a", ERR, ["cmd 1 not found"]);
   test("", "set a {get a}; a", OK, ["get a"]);
 
   test("", "set a {get args.v._size}; a one two three", OK, ["3"]);
@@ -363,6 +389,9 @@ function tests() {
   test("", "set a {get args.kv._size}; a one two -foo three -bar four", OK, ["2"]);
   test("", "set a {copy k args.kv; get k._size}; a one two -foo three -bar four", OK, ["2"]);
   test("", "set a {copy k args.kv; + [get k.-bar] [get k.-foo]}; a 1 2 -foo 3 -bar 4", OK, ["7"]);
+
+  test("", "assert {= 1 1}", OK, [""]);
+  test("", "assert {= 1 2}", ERR, ["FAILED ASSERT: = 1 2"]);
 
   console.log = log;
 }
