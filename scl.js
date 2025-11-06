@@ -1,6 +1,6 @@
 const OK = 0;
 const BREAK = 1;
-const XONTINUE = 2;
+const CONTINUE = 2;
 const RETURN = 3;
 const ERR = 4;
 
@@ -90,7 +90,7 @@ function to_num(cmd, value) {
 }
 
 function get_comparison_op(func) {
-  return (cmd, args) => {
+  return (_X, cmd, args) => {
     let fst = N(args[0]);
     let snd = N(args[1]);
     if (!(N.isFinite(fst) && N.isFinite(snd))) return [ERR, `cmd ${cmd} expected valid numbers`];
@@ -102,7 +102,7 @@ function register_num_comparison_op(X, cmd, func) {
   register_builtin(X, cmd, 2, get_comparison_op(func));
 }
 
-function compare_objects(X, a, b) {
+function compare_tables(X, a, b) {
   let a_entries = get_obj_by_prefix(X, a, true);
   let b_entries = get_obj_by_prefix(X, b, true);
   if (a_entries.length !== b_entries.length) return false;
@@ -181,8 +181,8 @@ function register_all_builtins(X) {
   });
   rb(X, "join", 2, (X, _, [sep, arr]) => [OK, get_values_by_prefix(X, arr).join(sep)]);
 
-  rb(X, "=obj", 2, (X, _, [a, b]) => [OK, compare_objects(X, a, b) ? "1" : "0"]);
-  rb(X, "!=obj", 2, (X, _, [a, b]) => [OK, !compare_objects(X, a, b) ? "1" : "0"]);
+  rb(X, "=table", 2, (X, _, [a, b]) => [OK, compare_tables(X, a, b) ? "1" : "0"]);
+  rb(X, "!=table", 2, (X, _, [a, b]) => [OK, !compare_tables(X, a, b) ? "1" : "0"]);
 
   rb(X, "copy", 2, (X, _, [dest, target]) => {
     let entries = get_obj_by_prefix(X, target);
@@ -204,12 +204,11 @@ function register_all_builtins(X) {
 
   // TODO : allow breaking out of multiple blocks
   rb(X, "break", 0, () => [BREAK, ""]);
-  rb(X, "continue", 0, () => [XONTINUE, ""]);
+  rb(X, "continue", 0, () => [CONTINUE, ""]);
   rb(X, "return", 1, (X, _, value) => [RETURN, value]);
 
   rb(X, "assert", 1, (X, _, [cond]) => {
-    result = interpret(cond, 0)[1];
-    if ((result = interpret(cond, 0)[1])[0] !== OK) return result;
+    if ((result = interpret(X, cond, 0)[1])[0] !== OK) return result;
     return !result[1] || result[1] === "0" ? [ERR, "FAILED ASSERT: " + cond] : [OK, ""];
   });
 
@@ -218,28 +217,28 @@ function register_all_builtins(X) {
     // TODO
   });
 
-  rb(X, "while", 2, (X, _, [condition, code]) => {
+  rb(X, "while", 2, (X, _, [cond, code]) => {
     while (true) {
-      if ((result = interpret(condition, 0)[1])[0] !== OK) return result;
+      if ((result = interpret(X, cond, 0)[1])[0] !== OK) return result;
       if (!result[1] || result[1] === "0") break;
-      result = interpret(code, 0)[1];
-      if (result[0] === XONTINUE) continue;
+      result = interpret(X, code, 0)[1];
+      if (result[0] === CONTINUE) continue;
       if (result[0] === BREAK) return [OK, ""];
       if (result[0] === ERR || result[0] === RETURN) return result;
     }
     return [OK, ""];
   });
 
-  rb(X, "for", 4, (X, _, [setup, condition, end, code]) => {
-    if ((result = interpret(setup, 0))[0] !== OK) return result;
+  rb(X, "for", 4, (X, _, [setup, cond, end, code]) => {
+    if ((result = interpret(X, setup, 0))[0] !== OK) return result;
     while (true) {
-      if ((result = interpret(condition, 0))[0] !== OK) return result;
+      if ((result = interpret(X, cond, 0))[0] !== OK) return result;
       if (!result[1] || result[1] === "0") break;
-      result = interpret(code, 0);
-      if (result[0] === XONTINUE) continue;
+      result = interpret(X, code, 0);
+      if (result[0] === CONTINUE) continue;
       if (result[0] === BREAK) return [OK, ""];
       if (result[0] === ERR || result[0] === RETURN) return result;
-      if ((result = interpret(end, 0))[0] !== OK) return result;
+      if ((result = interpret(X, end, 0))[0] !== OK) return result;
     }
     return [OK, ""];
   });
@@ -251,8 +250,8 @@ function register_all_builtins(X) {
       X.set("key", key.split(".").slice(1).join("."));
       X.set("i", i + "");
       X.set("it", typeof value === "function" ? "<builtin>" : value);
-      result = interpret(code, 0);
-      if (result[0] === XONTINUE) continue;
+      result = interpret(X, code, 0);
+      if (result[0] === CONTINUE) continue;
       if (result[0] === BREAK) return [OK, ""];
       if (result[0] === ERR || result[0] === RETURN) return result;
     }
@@ -262,17 +261,16 @@ function register_all_builtins(X) {
 
 function run_cmd(X, name, args) {
   const [impl] = lookup(X, name);
-  // log({ name, args, impl, X });
   if (!impl) return [ERR, `cmd ${name} not found`];
   if (typeof impl === "function") return L(impl(X, args));
   let X2 = new Map();
   X2.parent = X;
   def_args(X2, args);
-  // log({ new_X: X2, X });
   return interpret(X2, impl, 0)[1];
 }
 
 function interpret(X, src, i, opt = 0) {
+  // log({ src });
   let cmd = "";
   let token = "";
   let args = [];
@@ -297,7 +295,6 @@ function interpret(X, src, i, opt = 0) {
       token = "";
       i++;
     } else if (c === "[") {
-      // TODO
       [i, last_value] = interpret(X, src, i + 1, IS_SUBXOMMAND);
       token += last_value[1];
     } else if (c === "]") {
@@ -388,6 +385,7 @@ function tests() {
   console.log = (...args) => print_buffer.push(...args);
 
   log("Start Tests");
+
   test("", "put hello world", OK, ["hello world", "hello"]);
   test("", "put hello world;", OK, ["hello world", ""]);
 
@@ -417,16 +415,17 @@ function tests() {
   test("", "set a {get a}; a", OK, ["get a"]);
 
   test("", "set a {get args.v._size}; a one two three", OK, ["3"]);
+  test("", "set a {get args.v._size;}; a one two three", OK, [""]);
   test("", "set a {get args.kv._size}; a one two three", OK, ["0"]);
   test("", "set a {get args.kv._size}; a one two -foo three -bar four", OK, ["2"]);
   test("", "set a {copy k args.kv; get k._size}; a one two -foo three -bar four", OK, ["2"]);
   test("", "set a {copy k args.kv; + [get k.-bar] [get k.-foo]}; a 1 2 -foo 3 -bar 4", OK, ["7"]);
 
-  /*
   test("", "assert {= 1 1}", OK, [""]);
   test("", "assert {= 1 2}", ERR, ["FAILED ASSERT: = 1 2"]);
 
-  */
+  test("", "def a foo; def b.$a bar; get b.foo", OK, ["bar"]);
+  test("", "def a foo; def b.foo bar; get b.$a", OK, ["bar"]);
 
   console.log = log;
 }
