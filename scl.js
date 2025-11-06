@@ -80,7 +80,7 @@ function def_args(X, args) {
 function register_builtin(X, cmd, arg_count, func) {
   X.set(cmd, (X2, args) => {
     if (arg_count !== -1 && args.length !== arg_count) return [ERR, `cmd ${cmd} expected ${arg_count} arguments`];
-    return func(X2, cmd, args, arg_count);
+    return func(args, X2, cmd, arg_count);
   });
 }
 
@@ -90,7 +90,7 @@ function to_num(cmd, value) {
 }
 
 function get_comparison_op(func) {
-  return (_X, cmd, args) => {
+  return (args, _X, cmd) => {
     let fst = N(args[0]);
     let snd = N(args[1]);
     if (!(N.isFinite(fst) && N.isFinite(snd))) return [ERR, `cmd ${cmd} expected valid numbers`];
@@ -113,24 +113,24 @@ function compare_tables(X, a, b) {
   return true;
 }
 
-const cmd_get = (X, cmd, args) => get(X, args[0]);
-const cmd_set = (X, cmd, args) => (X.set(args[0], args[1]), [OK, args[1]]);
-const cmd_unset = (X, cmd, args) => (X.delete(args[0]), [OK, ""]);
-const cmd_put = (X, cmd, args) => (console.log(args.join(" ")), [OK, args[0] ?? ""]);
+// const cmd_get = (X, cmd, args) => get(X, args[0]);
+// const cmd_set = (X, cmd, args) => (X.set(args[0], args[1]), [OK, args[1]]);
+// const cmd_unset = (X, cmd, args) => (X.delete(args[0]), [OK, ""]);
+// const cmd_put = (X, cmd, args) => (console.log(args.join(" ")), [OK, args[0] ?? ""]);
 
 function register_all_builtins(X) {
   let rb = register_builtin;
-  rb(X, "def", 2, (X, __, [lhs, rhs]) => (X.set(lhs, rhs), [OK, rhs]));
-  rb(X, "get", 1, (X, __, [name]) => get(X, name));
-  rb(X, "set", 2, (X, __, [lhs, rhs]) => (set(X, lhs, rhs), [OK, rhs]));
-  rb(X, "unset", 1, (X, __, [name]) => (unset(X, name), [OK, ""]));
+  rb(X, "def", 2, ([lhs, rhs], X) => (X.set(lhs, rhs), [OK, rhs]));
+  rb(X, "get", 1, ([name], X) => get(X, name));
+  rb(X, "set", 2, ([lhs, rhs], X) => (set(X, lhs, rhs), [OK, rhs]));
+  rb(X, "unset", 1, ([name], X) => (unset(X, name), [OK, ""]));
 
-  rb(X, "put", -1, (_, __, args) => (console.log(args.join(" ")), [OK, args[0] ?? ""]));
+  rb(X, "put", -1, (args) => (console.log(args.join(" ")), [OK, args[0] ?? ""]));
 
-  rb(X, "+", 2, (_, cmd, args) => to_num(cmd, N(args[0]) + N(args[1])));
-  rb(X, "-", 2, (_, cmd, args) => to_num(cmd, N(args[0]) - N(args[1])));
-  rb(X, "*", 2, (_, cmd, args) => to_num(cmd, N(args[0]) * N(args[1])));
-  rb(X, "/", 2, (_, cmd, args) => to_num(cmd, N(args[0]) / N(args[1])));
+  rb(X, "+", 2, (args, _, cmd) => to_num(cmd, N(args[0]) + N(args[1])));
+  rb(X, "-", 2, (args, _, cmd) => to_num(cmd, N(args[0]) - N(args[1])));
+  rb(X, "*", 2, (args, _, cmd) => to_num(cmd, N(args[0]) * N(args[1])));
+  rb(X, "/", 2, (args, _, cmd) => to_num(cmd, N(args[0]) / N(args[1])));
 
   let rnco = register_num_comparison_op;
   rnco(X, "=", (a, b) => a === b);
@@ -140,29 +140,29 @@ function register_all_builtins(X) {
   rnco(X, "<=", (a, b) => a <= b);
   rnco(X, ">=", (a, b) => a >= b);
 
-  rb(X, "=str", 2, (X, _, [a, b]) => (a === b ? "1" : "0"));
-  rb(X, "!=str", 2, (X, _, [a, b]) => (a !== b ? "1" : "0"));
-  rb(X, "<str", 2, (X, _, [a, b]) => (a < b ? "1" : "0"));
-  rb(X, ">str", 2, (X, _, [a, b]) => (a > b ? "1" : "0"));
-  rb(X, "<=str", 2, (X, _, [a, b]) => (a <= b ? "1" : "0"));
-  rb(X, ">=str", 2, (X, _, [a, b]) => (a >= b ? "1" : "0"));
+  rb(X, "=str", 2, ([a, b]) => (a === b ? "1" : "0"));
+  rb(X, "!=str", 2, ([a, b]) => (a !== b ? "1" : "0"));
+  rb(X, "<str", 2, ([a, b]) => (a < b ? "1" : "0"));
+  rb(X, ">str", 2, ([a, b]) => (a > b ? "1" : "0"));
+  rb(X, "<=str", 2, ([a, b]) => (a <= b ? "1" : "0"));
+  rb(X, ">=str", 2, ([a, b]) => (a >= b ? "1" : "0"));
 
-  rb(X, "append", -1, (X, _, args) => [OK, args.join("")]);
-  rb(X, "split", 3, (X, _, [name, sep, str]) => (set_list(X, name, str.split(sep)), [OK, name]));
-  rb(X, "at", 2, (X, _, [i, str]) => [OK, str[i] ?? ""]);
-  rb(X, "size", 1, (X, _, [str]) => [OK, str.length ?? ""]);
-  rb(X, "slice", 3, (X, cmd, [start, end, str]) => {
+  rb(X, "append", -1, (args) => [OK, args.join("")]);
+  rb(X, "split", 3, ([name, sep, str], X) => (set_list(X, name, str.split(sep)), [OK, name]));
+  rb(X, "at", 2, ([i, str]) => [OK, str[i] ?? ""]);
+  rb(X, "size", 1, ([str]) => [OK, str.length ?? ""]);
+  rb(X, "slice", 3, ([start, end, str], _X, cmd) => {
     if (!(N.isFinite(N(start)) && N.isFinite(N(end)))) return [ERR, `cmd ${cmd} expected valid numbers`];
     return [OK, str.slice(start, end) ?? ""];
   });
 
-  rb(X, "push", 2, (X, _, [lhs, it]) => {
+  rb(X, "push", 2, ([lhs, it], X) => {
     let size = X.get(lhs + "._size") ?? 0;
     X.set(lhs + "." + size, it);
     X.set(lhs + "._size", size + 1 + "");
     return [OK, ""];
   });
-  rb(X, "pop", 1, (X, _, [lhs]) => {
+  rb(X, "pop", 1, ([lhs], X) => {
     let size = X.get(lhs + "._size") ?? 0;
     if (size) {
       X.delete(lhs + "." + size - 1);
@@ -170,7 +170,7 @@ function register_all_builtins(X) {
     }
     return [OK, ""];
   });
-  rb(X, "concat", -1, (X, cmd, args) => {
+  rb(X, "concat", -1, (args, X, cmd) => {
     if (args.length < 2) return [ERR, `cmd ${cmd} expected at least 2 arguments`];
     let size = X.get(args[0] + "._size") ?? 0;
     for (let i = 1; i < args.length; i++) {
@@ -179,23 +179,23 @@ function register_all_builtins(X) {
     }
     X.set(args[0] + "._size", size + "");
   });
-  rb(X, "join", 2, (X, _, [sep, arr]) => [OK, get_values_by_prefix(X, arr).join(sep)]);
+  rb(X, "join", 2, ([sep, arr], X) => [OK, get_values_by_prefix(X, arr).join(sep)]);
 
-  rb(X, "=table", 2, (X, _, [a, b]) => [OK, compare_tables(X, a, b) ? "1" : "0"]);
-  rb(X, "!=table", 2, (X, _, [a, b]) => [OK, !compare_tables(X, a, b) ? "1" : "0"]);
+  rb(X, "=table", 2, ([a, b], X) => [OK, compare_tables(X, a, b) ? "1" : "0"]);
+  rb(X, "!=table", 2, ([a, b], X) => [OK, !compare_tables(X, a, b) ? "1" : "0"]);
 
-  rb(X, "copy", 2, (X, _, [dest, target]) => {
+  rb(X, "copy", 2, ([dest, target], X) => {
     let entries = get_obj_by_prefix(X, target);
     for (let i = 0; i < entries.length; i++) X.set(dest + "." + entries[i][0].slice(target.length + 1), entries[i][1]);
     X.set(dest + "._size", entries.length + "");
     return [OK, ""];
   });
-  rb(X, "delete", 1, (X, _, [obj]) => {
+  rb(X, "delete", 1, ([obj], X) => {
     [...X.entries()].forEach(([key]) => (key.startsWith(obj + ".") ? X.delete(key) : undefined));
     return [OK, ""];
   });
 
-  rb(X, "with", 2, (X, _, [dict, src]) => {
+  rb(X, "with", 2, ([dict, src], X) => {
     // TODO : produce new context from dict
     X = new Map();
     let [_i, result] = interpret(X, src, 0);
@@ -205,19 +205,19 @@ function register_all_builtins(X) {
   // TODO : allow breaking out of multiple blocks
   rb(X, "break", 0, () => [BREAK, ""]);
   rb(X, "continue", 0, () => [CONTINUE, ""]);
-  rb(X, "return", 1, (X, _, value) => [RETURN, value]);
+  rb(X, "return", 1, ([value]) => [RETURN, value]);
 
-  rb(X, "assert", 1, (X, _, [cond]) => {
+  rb(X, "assert", 1, ([cond], X) => {
     if ((result = interpret(X, cond, 0)[1])[0] !== OK) return result;
-    return !result[1] || result[1] === "0" ? [ERR, "FAILED ASSERT: " + cond] : [OK, ""];
+    return !result[1] || result[1] === "0" ? [ERR, "FAILED ASSERT: { " + cond + " }"] : [OK, ""];
   });
 
-  rb(X, "if", -1, (X, _, args) => {
+  rb(X, "if", -1, (args, X) => {
     if (args.length < 3) return [ERR, `cmd ${cmd} expected at least 3 arguments`];
     // TODO
   });
 
-  rb(X, "while", 2, (X, _, [cond, code]) => {
+  rb(X, "while", 2, ([cond, code], X) => {
     while (true) {
       if ((result = interpret(X, cond, 0)[1])[0] !== OK) return result;
       if (!result[1] || result[1] === "0") break;
@@ -229,7 +229,7 @@ function register_all_builtins(X) {
     return [OK, ""];
   });
 
-  rb(X, "for", 4, (X, _, [setup, cond, end, code]) => {
+  rb(X, "for", 4, ([setup, cond, end, code], X) => {
     if ((result = interpret(X, setup, 0))[0] !== OK) return result;
     while (true) {
       if ((result = interpret(X, cond, 0))[0] !== OK) return result;
@@ -243,7 +243,7 @@ function register_all_builtins(X) {
     return [OK, ""];
   });
 
-  rb(X, "each", 2, (X, _, [prefix, code]) => {
+  rb(X, "each", 2, ([prefix, code], X) => {
     let entries = get_obj_by_prefix(X, prefix);
     for (let i = 0; i < entries.length; i++) {
       let [key, value] = entries[i];
@@ -422,7 +422,7 @@ function tests() {
   test("", "set a {copy k args.kv; + [get k.-bar] [get k.-foo]}; a 1 2 -foo 3 -bar 4", OK, ["7"]);
 
   test("", "assert {= 1 1}", OK, [""]);
-  test("", "assert {= 1 2}", ERR, ["FAILED ASSERT: = 1 2"]);
+  test("", "assert {= 1 2}", ERR, ["FAILED ASSERT: { = 1 2 }"]);
 
   test("", "def a foo; def b.$a bar; get b.foo", OK, ["bar"]);
   test("", "def a foo; def b.foo bar; get b.$a", OK, ["bar"]);
