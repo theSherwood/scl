@@ -125,6 +125,7 @@ function register_all_builtins(X) {
   rb(X, "set", 2, ([lhs, rhs], X) => (set(X, lhs, rhs), [OK, rhs]));
   rb(X, "unset", 1, ([name], X) => (unset(X, name), [OK, ""]));
 
+  rb(X, "id", 1, ([name]) => [OK, name]);
   rb(X, "put", -1, (args) => (console.log(args.join(" ")), [OK, args[0] ?? ""]));
 
   rb(X, "+", 2, (args, _, cmd) => to_num(cmd, N(args[0]) + N(args[1])));
@@ -210,6 +211,14 @@ function register_all_builtins(X) {
   rb(X, "assert", 1, ([cond], X) => {
     if ((result = interpret(X, cond, 0)[1])[0] !== OK) return result;
     return !result[1] || result[1] === "0" ? [ERR, "FAILED ASSERT: { " + cond + " }"] : [OK, ""];
+  });
+
+  rb(X, "try", 2, ([code, catch2], X) => {
+    if ((result = interpret(X, code, 0)[1])[0] === ERR) {
+      X.set("error", result[1]);
+      result = interpret(X, catch2, 0)[1];
+    }
+    return result;
   });
 
   rb(X, "if", -1, (args, X) => {
@@ -306,8 +315,19 @@ function interpret(X, src, i, opt = 0) {
       return [i + 1, last_value];
     } else if (c === "{") {
       let string_start = ++i;
-      while ((c = src[i]) !== "}") {
+      let count = 1;
+      while ((c = src[i])) {
+        if (c === "{") count++;
+        if (c === "}") count--;
+        if (count === 0) break;
         if (i >= len) return [len, [ERR, "Unexpected end of source"]];
+        if (c === '"') {
+          while ((c = src[i]) !== '"') {
+            if (c === "\\") c = src[++i];
+            if (i >= len) return [len, [ERR, "Unexpected end of source"]];
+            i++;
+          }
+        }
         i++;
       }
       token += src.slice(string_start, i);
@@ -361,6 +381,8 @@ function eval(src) {
   return result;
 }
 
+let test_failures = 0;
+
 function test(name, src, code, values) {
   print_buffer.length = 0;
   log("TEST:", name || src);
@@ -373,6 +395,7 @@ function test(name, src, code, values) {
   if (result_code === code && result_value === values.at(-1) && all_equal) {
     log("PASS");
   } else {
+    test_failures++;
     log("FAIL");
     log("EXPECTED:", values);
     log("ACTUAL:", [...print_buffer, result_value]);
@@ -381,6 +404,7 @@ function test(name, src, code, values) {
 }
 
 function tests() {
+  test_failures = 0;
   // Send the console.logs from "put" to the buffer
   console.log = (...args) => print_buffer.push(...args);
 
@@ -426,6 +450,15 @@ function tests() {
 
   test("", "def a foo; def b.$a bar; get b.foo", OK, ["bar"]);
   test("", "def a foo; def b.foo bar; get b.$a", OK, ["bar"]);
+  test("", "def a foo; def b.[get a] bar; get b.foo", OK, ["bar"]);
+  test("", "def a foo; def b.foo bar; get b.[get a]", OK, ["bar"]);
+  test("", "def a.[id foo] bar; get a.foo", OK, ["bar"]);
+  test("", "def a.foo bar; get a.[id foo]", OK, ["bar"]);
+
+  test("", "try {assert {= 1 1}} {id $error}", OK, [""]);
+  test("", "try {assert {= 1 2}} {id $error}", OK, ["FAILED ASSERT: { = 1 2 }"]);
+
+  log(test_failures ? test_failures + " FAILURES" : "ALL TESTS PASSED");
 
   console.log = log;
 }
