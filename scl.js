@@ -527,6 +527,9 @@ function tests() {
   test("", "set a {size $argv;}; a one two three", OK, [""]);
   test("", "set a {size $argkv}; a one two three", OK, ["0"]);
   test("", "set a {size $argkv}; a one two -foo three -bar four", OK, ["2"]);
+  test("", "set a {get argv 1}; a one two three", OK, ["two"]);
+  test("", "set a {get argkv -foo}; a one two -foo three -bar four", OK, ["three"]);
+  test("", "set a {get argkv -foo bar}; a one two -foo [table bar 4]", OK, ["4"]);
 
   test("", "assert {= 1 1}", OK, [""]);
   test("", "assert {= 1 2}", ERR, ["FAILED ASSERT: { = 1 2 }"]);
