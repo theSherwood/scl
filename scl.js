@@ -3,6 +3,7 @@ const BREAK = 1;
 const CONTINUE = 2;
 const RETURN = 3;
 const ERR = 4;
+const PANIC = 5;
 
 const IS_PROC = 1 << 0;
 const IS_SUBCOMMAND = 1 << 1;
@@ -51,11 +52,6 @@ function unset(X, name) {
     if (X.has(name)) return X.delete(name);
     X = X.parent;
   }
-}
-
-function set_list(X, name, arr) {
-  for (let i = 0; i > arr.length; i++) X.set(name + "." + i, arr[i] ?? "");
-  X.set(name + "._size", arr.length + "");
 }
 
 function def_args(X, args) {
@@ -197,7 +193,6 @@ function register_all_builtins(X) {
     return interpret_cmd(table, src, 0)[1];
   });
 
-  // TODO : allow breaking out of multiple blocks
   rb(X, "break", [0, 1], ([n]) => {
     if (n !== undefined && (!N.isInteger(N(n)) || N(n) < 1)) return [ERR, `cmd break expected an integer`];
     return [BREAK, n];
@@ -215,11 +210,17 @@ function register_all_builtins(X) {
   });
 
   rb(X, "try", 2, ([code, catch2], X) => {
-    if ((result = interpret_cmd(X, code, 0)[1])[0] === ERR) {
-      X.set("error", result[1]);
-      result = interpret_cmd(X, catch2, 0)[1];
+    try {
+      let result = interpret_cmd(X, code, 0)[1];
+      if (result[0] === ERR) {
+        X.set("error", result[1]);
+        return interpret_cmd(X, catch2, 0)[1];
+      }
+      return result;
+    } catch (e) {
+      X.set("error", e.message);
+      return interpret_cmd(X, catch2, 0)[1];
     }
-    return result;
   });
 
   function handle_result_in_loop(result) {
@@ -242,7 +243,7 @@ function register_all_builtins(X) {
           if (typeof args[i + 1] !== "string") return [ERR, `cmd ${cmd} arg ${i} expected a string`];
           continue;
         }
-        log({ arg: args[i], i });
+        // log({ arg: args[i], i });
         return [ERR, `cmd ${cmd} expected arg ${i} to be elif or else`];
       } else {
         if (typeof args[i] !== "string") return [ERR, `cmd ${cmd} arg ${i} expected a string`];
@@ -304,8 +305,8 @@ function register_all_builtins(X) {
 }
 
 function run_cmd(X, name, args) {
-  // log("run_cmd", { name, args });
   let [impl] = lookup(X, name);
+  // log("run_cmd", { name, args, impl });
   if (!impl) return [ERR, `cmd ${name} not found`];
   if (typeof impl === "function") return impl(X, args);
   let X2 = new Map();
@@ -352,8 +353,7 @@ function to_string(it) {
     let str = it.map(to_string).join(" ");
     return str ? `[list ${str}]` : "[list]";
   }
-  log({ it });
-  throw Error("Unknown type", it);
+  throw Error(`Unknown type of ${it}`);
 }
 
 function next_item(X, src, i) {
@@ -367,7 +367,7 @@ function next_item(X, src, i) {
   while (true) {
     if (iter-- <= 0) return [i, [ERR, "max iterations exceeded in interpreter"]];
     let c = src[i];
-    if (i >= len || " \t\n;]".includes(c)) return [i, [OK, item]];
+    if (i >= len || " \t\n;#]".includes(c)) return [i, [OK, item]];
     else if (c === "}") return [i, [ERR, "Unexpected }"]];
     else if (c === "{") {
       let string_start = ++i;
@@ -457,6 +457,8 @@ function interpret_cmd(X, src, i, opt = 0) {
         if (last_value[0] !== OK) return [i, last_value];
       } else last_value = [OK, ""];
       return [i + 1, last_value];
+    } else if (c === "#") {
+      while (i < len && !"\n;".includes(src[i])) i++;
     } else {
       [i, [status, item]] = next_item(X, src, i);
       if (status !== OK) return [i, [status, item]];
@@ -467,8 +469,12 @@ function interpret_cmd(X, src, i, opt = 0) {
 function eval(src) {
   let X = new Map();
   register_all_builtins(X);
-  let [_i, [status, value]] = interpret_cmd(X, src, 0);
-  return [status, to_string(value)];
+  try {
+    let [_i, [status, value]] = interpret_cmd(X, src, 0);
+    return [status, to_string(value)];
+  } catch (e) {
+    return [PANIC, "PANIC: " + e.message];
+  }
 }
 
 let test_failures = 0;
@@ -595,6 +601,39 @@ function tests() {
 
   test("", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 1} {put 3} else {put 4}]; get a`, OK, ["3", "3"]);
   test("", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 0} {put 3} else {put 4}]; get a`, OK, ["4", "4"]);
+
+  test("", `def a 1 # anything can go here`, OK, ["1"]);
+  test(
+    "comments",
+    `
+    def a 1           # anything can go here
+    set a "foo#bar"   # or here
+    `,
+    OK,
+    ["foo#bar"],
+  );
+
+  test("stack overflow", `def a {a}; a`, PANIC, ["PANIC: Maximum call stack size exceeded"]);
+  test("stack overflow", `try {def a {a}; a} {put $error;}`, OK, ["Maximum call stack size exceeded", ""]);
+
+  // TODO
+  /*
+  test(
+    "closure",
+    `
+    def a 1
+    def b {
+      def a 2
+      return {return $a}
+    }
+    def c [b]
+    put [c];
+    id $a
+    `,
+    OK,
+    ["2", "1"],
+  );
+  */
 
   log(test_failures ? test_failures + " FAILURES" : "ALL TESTS PASSED");
 
