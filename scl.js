@@ -4,31 +4,32 @@ const CONTINUE = 2;
 const RETURN = 3;
 const ERR = 4;
 
-const N = Number;
-
 const IS_PROC = 1 << 0;
 const IS_SUBCOMMAND = 1 << 1;
 const IS_BLOCK = 1 << 2;
 
 let print_buffer = [];
 let log = console.log;
-let L = (arg, msg) => (log({ L: arg, ...(msg ? { msg } : {}) }), arg);
+
+const L = (arg, msg) => (log({ L: arg, ...(msg ? { msg } : {}) }), arg);
+const N = Number;
+const U = undefined;
 
 function lookup(X, name) {
   while (X) {
     if (X.has(name)) return [X.get(name), X];
     X = X.parent;
   }
-  return ["", null];
+  return [U, U];
 }
 
 function get(X, args) {
   let fst = args[0];
-  let value = lookup(X, fst)[0] ?? "";
+  let value = lookup(X, fst)[0];
   let i = 1;
   while (i < args.length) {
-    if (typeof value === "string" || Array.isArray(value)) value = value[args[i]] ?? "";
-    if (value instanceof Map) value = value.get(args[i]) ?? "";
+    if (typeof value === "string" || Array.isArray(value)) value = value[args[i]];
+    if (value instanceof Map) value = value.get(args[i]);
     if (typeof value === "number") return [ERR, "numbers do not support key lookups"];
     if (typeof value === "function") return [ERR, "builtins do not support key lookups"];
     i++;
@@ -52,22 +53,6 @@ function unset(X, name) {
   }
 }
 
-function get_obj_by_prefix(X, prefix, remove_prefix = false) {
-  let result = [];
-  let len = prefix.length;
-  for (let [key, value] of X.entries()) {
-    if (key.startsWith(prefix) && key[len] === "." && key[len + 1] !== "_") {
-      result.push([remove_prefix ? key.slice(len) : key, value]);
-    }
-  }
-  result.sort((a, b) => a[0].localeCompare(b[0]));
-  return result;
-}
-
-function get_values_by_prefix(X, prefix) {
-  return get_obj_by_prefix(X, prefix).map(([_key, value]) => value);
-}
-
 function set_list(X, name, arr) {
   for (let i = 0; i > arr.length; i++) X.set(name + "." + i, arr[i] ?? "");
   X.set(name + "._size", arr.length + "");
@@ -80,8 +65,7 @@ function def_args(X, args) {
   for (let i = 0; i < args.length; i++) {
     let arg = args[i];
     if (arg === "--") positional_only = true;
-    else if (typeof arg === "string" && arg.startsWith("-") && !positional_only)
-      argkv.set(to_string(arg), args[++i] ?? "");
+    else if (typeof arg === "string" && arg.startsWith("-") && !positional_only) argkv.set(to_string(arg), args[++i]);
     else argv.push(arg);
   }
   X.set("argv", argv);
@@ -117,30 +101,15 @@ function register_num_comparison_op(X, cmd, func) {
   register_builtin(X, cmd, 2, get_comparison_op(func));
 }
 
-function compare_tables(X, a, b) {
-  let a_entries = get_obj_by_prefix(X, a, true);
-  let b_entries = get_obj_by_prefix(X, b, true);
-  if (a_entries.length !== b_entries.length) return false;
-  for (let i = 0; i < a_entries.length; i++) {
-    let [key, value] = a_entries[i];
-    if (key !== b_entries[i][0] || value !== b_entries[i][1]) return false;
-  }
-  return true;
-}
-
-// const cmd_set = (X, cmd, args) => (X.set(args[0], args[1]), [OK, args[1]]);
-// const cmd_unset = (X, cmd, args) => (X.delete(args[0]), [OK, ""]);
-// const cmd_put = (X, cmd, args) => (console.log(args.join(" ")), [OK, args[0] ?? ""]);
-
 function register_all_builtins(X) {
   let rb = register_builtin;
   rb(X, "def", [2, 1000], ([lhs, rhs], X) => (X.set(lhs, rhs), [OK, rhs]));
   rb(X, "get", [1, 1000], (args, X) => get(X, args));
   rb(X, "set", [2, 1000], ([lhs, rhs], X) => (set(X, lhs, rhs), [OK, rhs]));
-  rb(X, "unset", [1, 1000], ([name], X) => (unset(X, name), [OK, ""]));
+  rb(X, "unset", [1, 1000], ([name], X) => (unset(X, name), [OK, undefined]));
 
   rb(X, "id", 1, ([name]) => [OK, name]);
-  rb(X, "put", -1, (args) => (console.log(args.join(" ")), [OK, args[0] ?? ""]));
+  rb(X, "put", -1, (args) => (console.log(args.map((arg) => to_string(arg)).join(" ")), [OK, args[0]]));
 
   rb(X, "+", 2, (args, _, cmd) => to_num(cmd, N(args[0]) + N(args[1])));
   rb(X, "-", 2, (args, _, cmd) => to_num(cmd, N(args[0]) - N(args[1])));
@@ -169,13 +138,12 @@ function register_all_builtins(X) {
     return [ERR, `cmd ${cmd} expected a string or list or table`];
   });
 
-  rb(X, "append", -1, (args) => [OK, args.join("")]);
-  rb(X, "split", 3, ([name, sep, str], X) => (set_list(X, name, str.split(sep)), [OK, name]));
-  rb(X, "at", 2, ([i, str]) => [OK, str[i] ?? ""]);
-  // rb(X, "size", 1, ([str]) => [OK, str.length ?? ""]);
+  rb(X, "append", -1, (args) => [OK, args?.join("")]);
+  rb(X, "split", 3, ([sep, str]) => [OK, str.split(sep)]);
+  rb(X, "at", 2, ([i, str]) => [OK, str[i]]);
   rb(X, "slice", 3, ([start, end, str], _X, cmd) => {
     if (!(N.isFinite(N(start)) && N.isFinite(N(end)))) return [ERR, `cmd ${cmd} expected valid numbers`];
-    return [OK, str.slice(start, end) ?? ""];
+    return [OK, str.slice(start, end)];
   });
 
   rb(X, "push", 2, ([list, it], X, cmd) => {
@@ -197,12 +165,9 @@ function register_all_builtins(X) {
     return [OK, list.join(sep)];
   });
 
-  rb(X, "=table", 2, ([a, b], X) => [OK, compare_tables(X, a, b) ? "1" : "0"]);
-  rb(X, "!=table", 2, ([a, b], X) => [OK, !compare_tables(X, a, b) ? "1" : "0"]);
-
   rb(X, "list", -1, (args) => [OK, args]);
   let cmd_to_list = ([code], X) => {
-    let [_i, [status, values]] = interpret_value_list(X, code, 0);
+    let values = interpret_value_list(X, code, 0);
     if (status !== OK) return [ERR, values];
     if (!Array.isArray(values)) return [ERR, `Failed to build list`];
     return [OK, values];
@@ -224,19 +189,24 @@ function register_all_builtins(X) {
 
   rb(X, "delete", 1, ([obj], X) => {
     [...X.entries()].forEach(([key]) => (key.startsWith(obj + ".") ? X.delete(key) : undefined));
-    return [OK, ""];
+    return [OK, U];
   });
 
   rb(X, "with", 2, ([table, src], X, cmd) => {
     if (!(table instanceof Map)) return [ERR, `cmd ${cmd} expected a table`];
-    let [_i, result] = interpret_cmd(table, src, 0);
-    return result;
+    return interpret_cmd(table, src, 0)[1];
   });
 
   // TODO : allow breaking out of multiple blocks
-  rb(X, "break", 0, () => [BREAK, ""]);
-  rb(X, "continue", 0, () => [CONTINUE, ""]);
-  rb(X, "return", 1, ([value]) => [RETURN, value]);
+  rb(X, "break", [0, 1], ([n]) => {
+    if (n !== undefined && (!N.isInteger(N(n)) || N(n) < 1)) return [ERR, `cmd break expected an integer`];
+    return [BREAK, n];
+  });
+  rb(X, "continue", [0, 1], ([n]) => {
+    if (n !== undefined && (!N.isInteger(N(n)) || N(n) < 1)) return [ERR, `cmd break expected an integer`];
+    return [CONTINUE, n];
+  });
+  rb(X, "return", [0, 1], ([value]) => [RETURN, value]);
 
   rb(X, "assert", 1, ([cond], X) => {
     if ((result = interpret_cmd(X, cond, 0)[1])[0] !== OK) return result;
@@ -251,76 +221,76 @@ function register_all_builtins(X) {
     return result;
   });
 
+  function handle_result_in_loop(result) {
+    let [status, value] = result;
+    if (status === ERR || status === RETURN) return result;
+    if (status === BREAK && N(value) > 1) return [BREAK, N(value) - 1 + ""];
+    if (status === BREAK) return [OK, U];
+    if (status === CONTINUE && N(value) > 1) return [CONTINUE, N(value) - 1 + ""];
+  }
+
   rb(X, "if", -1, (args, X) => {
     if (args.length < 3) return [ERR, `cmd ${cmd} expected at least 3 arguments`];
     // TODO
   });
 
-  rb(X, "while", 2, ([cond, code], X) => {
+  rb(X, "while", 2, ([cond, code], X, cmd) => {
+    let iter = 1_0;
     while (true) {
+      if (iter-- < 0) return [ERR, `max iterations exceeded in ${cmd} loop`];
       if ((result = interpret_cmd(X, cond, 0)[1])[0] !== OK) return result;
       if (!result[1] || result[1] === "0") break;
-      result = interpret_cmd(X, code, 0)[1];
-      if (result[0] === CONTINUE) continue;
-      if (result[0] === BREAK) return [OK, ""];
-      if (result[0] === ERR || result[0] === RETURN) return result;
+      result = handle_result_in_loop(interpret_cmd(X, code, 0)[1]);
+      if (result) return result;
     }
-    return [OK, ""];
+    return [OK, U];
   });
 
   rb(X, "for", 4, ([setup, cond, end, code], X) => {
     if ((result = interpret_cmd(X, setup, 0))[0] !== OK) return result;
+    let iter = 1_000;
     while (true) {
+      if (iter-- < 0) return [ERR, `max iterations exceeded in ${cmd} loop`];
       if ((result = interpret_cmd(X, cond, 0))[0] !== OK) return result;
       if (!result[1] || result[1] === "0") break;
-      result = interpret_cmd(X, code, 0);
-      if (result[0] === CONTINUE) continue;
-      if (result[0] === BREAK) return [OK, ""];
+      result = handle_result_in_loop(interpret_cmd(X, code, 0)[1]);
+      if (result) return result;
+      result = interpret_cmd(X, end, 0)[1];
       if (result[0] === ERR || result[0] === RETURN) return result;
-      if ((result = interpret_cmd(X, end, 0))[0] !== OK) return result;
+      if ((result = interpret_cmd(X, setup, 0))[0] !== OK) return result;
     }
-    return [OK, ""];
+    return [OK, U];
   });
 
   rb(X, "each", 2, ([coll, code], X, cmd) => {
-    if (coll instanceof Map) {
-      let entries = Array.from(coll.entries());
-      for (let i = 0; i < entries.length; i++) {
-        let [key, value] = entries[i];
-        X.set("key", key);
-        X.set("i", i);
-        X.set("it", value);
-        result = interpret_cmd(X, code, 0);
-        if (result[0] === CONTINUE) continue;
-        if (result[0] === BREAK) return [OK, ""];
-        if (result[0] === ERR || result[0] === RETURN) return result;
-      }
-      return [OK, ""];
-    } else if (Array.isArray(coll)) {
-      for (let i = 0; i < coll.length; i++) {
-        let value = coll[i];
-        X.set("i", i);
-        X.set("it", value);
-        result = interpret_cmd(X, code, 0);
-        if (result[0] === CONTINUE) continue;
-        if (result[0] === BREAK) return [OK, ""];
-        if (result[0] === ERR || result[0] === RETURN) return result;
-      }
-      return [OK, ""];
+    let is_table = coll instanceof Map;
+    if (!(coll instanceof Map || Array.isArray(coll))) return [ERR, `cmd ${cmd} expected a list or table`];
+    let items = Array.isArray(coll) ? coll : Array.from(coll.entries());
+    for (let i = 0; i < items.length; i++) {
+      let item = items[i];
+      if (is_table) X.set("key", item[0]), X.set("it", item[1]), X.set("i", i);
+      else X.set("it", item), X.set("i", i);
+      result = handle_result_in_loop(interpret_cmd(X, code, 0)[1]);
+      if (result) return result;
     }
-    return [ERR, `cmd ${cmd} expected a list or table`];
+    return [OK, U];
   });
 }
 
 function run_cmd(X, name, args) {
   // log("run_cmd", { name, args });
-  const [impl] = lookup(X, name);
+  let [impl] = lookup(X, name);
   if (!impl) return [ERR, `cmd ${name} not found`];
   if (typeof impl === "function") return impl(X, args);
   let X2 = new Map();
   X2.parent = X;
   def_args(X2, args);
-  return interpret_cmd(X2, impl, 0)[1];
+  let res = interpret_cmd(X2, impl, 0)[1];
+  let [status, value] = res;
+  if (status === RETURN) return [OK, value];
+  else if (status === BREAK) return [ERR, "break may not be used to break out of a procedure"];
+  else if (status === CONTINUE) return [ERR, "continue may not be used to break out of a procedure"];
+  else return [status, value];
 }
 
 function parse_string(src, i) {
@@ -343,28 +313,33 @@ function encode_string(str) {
 }
 
 function to_string(it) {
-  if (it === null) return "";
+  if (it === U || it === undefined) return "";
   if (typeof it === "string") return it;
   if (typeof it === "number") return it + "";
   if (typeof it === "function") return "<builtin>"; // TODO : get the name
   if (it instanceof Map) {
     let entries = Array.from(it.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    return "[table " + entries.map(([key, value]) => to_string(key) + " " + to_string(value)).join(" ") + "]";
+    let str = entries.map(([key, value]) => to_string(key) + " " + to_string(value)).join(" ");
+    return str ? `[table ${str}]` : "[table]";
   }
-  if (Array.isArray(it)) return "[list " + it.map(to_string).join(" ") + "]";
+  if (Array.isArray(it)) {
+    let str = it.map(to_string).join(" ");
+    return str ? `[list ${str}]` : "[list]";
+  }
+  log({ it });
   throw Error("Unknown type", it);
 }
 
 function next_item(X, src, i) {
   // log({ src, i });
-  let item = (value = null);
+  let item = (value = U);
   let status = 0;
   let str = "";
   let len = src.length;
   let iter = 100;
   let char_arr = [];
   while (true) {
-    if (iter-- <= 0) return [i, [ERR, "Infinite loop detected"]];
+    if (iter-- <= 0) return [i, [ERR, "max iterations exceeded in interpreter"]];
     let c = src[i];
     if (i >= len || " \t\n;]".includes(c)) return [i, [OK, item]];
     else if (c === "}") return [i, [ERR, "Unexpected }"]];
@@ -384,7 +359,7 @@ function next_item(X, src, i) {
       let res = interpret_cmd(X, src, i + 1, IS_SUBCOMMAND);
       [i, [status, value]] = res;
       if (status !== OK) return res;
-      item === null ? (item = value) : (item = to_string(item) + to_string(value));
+      item === U ? (item = value) : (item = to_string(item) + to_string(value));
     } else if (c === '"') {
       char_arr = [];
       while ((c = src[++i]) !== '"') {
@@ -397,7 +372,7 @@ function next_item(X, src, i) {
     } else {
       [i, str] = parse_string(src, i + (c === "$"));
       value = c === "$" ? X.get(str) : str;
-      item === null ? (item = value) : (item = to_string(item) + to_string(value));
+      item === U ? (item = value) : (item = to_string(item) + to_string(value));
     }
   }
 }
@@ -407,14 +382,14 @@ function interpret_value_list(X, src, i) {
   let len = src.length;
   let iter = 100;
   while (i < len) {
-    if (iter-- <= 0) return [i, [ERR, "Infinite loop detected"]];
+    if (iter-- <= 0) return [i, [ERR, "max iterations exceeded in interpreter"]];
     let c = src[i];
     if (" \t\n".includes(c)) i++;
     else if (";]}".includes(c)) return [i, [ERR, "Unexpected " + c]];
     else {
       [i, [status, item]] = next_item(X, src, i);
       if (status !== OK) return [i, [status, item]];
-      if (item !== null) values.push(item);
+      if (item !== U) values.push(item);
     }
   }
   return values;
@@ -423,34 +398,38 @@ function interpret_value_list(X, src, i) {
 function interpret_cmd(X, src, i, opt = 0) {
   // log({ src, i, opt, X });
   let cmd = (str = "");
-  let item = null;
+  let item = U;
   let args = [];
   let last_value = [OK, ""];
   let len = src.length;
   let iter = 100;
   while (true) {
-    if (iter-- <= 0) return [i, [ERR, "Infinite loop detected"]];
+    if (iter-- <= 0) return [i, [ERR, "max iterations exceeded in interpreter"]];
     let c = src[i];
     if (i >= len || c === "\n" || c === ";") {
-      if (item !== null && cmd) args.push(item), (item = null);
-      else if (item !== null && !cmd) (cmd = item), (item = null);
-      if (cmd) last_value = run_cmd(X, cmd, args);
+      if (item !== U && cmd) args.push(item), (item = U);
+      else if (item !== U && !cmd) (cmd = item), (item = U);
+      if (cmd) {
+        last_value = run_cmd(X, cmd, args);
+        if (last_value[0] !== OK) return [i, last_value];
+      }
       (cmd = ""), (args.length = 0);
       if (c === ";" && last_value[0] === OK) last_value = [OK, ""];
       if (i >= len) return [i, last_value];
       i++;
-      if (last_value[0] === ERR) return [i, last_value];
     } else if (c === " " || c === "\t") {
-      if (item !== null && cmd) args.push(item);
-      else if (item !== null && !cmd) cmd = item;
-      item = null;
+      if (item !== U && cmd) args.push(item);
+      else if (item !== U && !cmd) cmd = item;
+      item = U;
       i++;
     } else if (c === "]") {
       if (!(opt & IS_SUBCOMMAND)) return [i, [ERR, "Unexpected ]"]];
-      if (item !== null && cmd) args.push(item), (item = null);
-      else if (item !== null && !cmd) (cmd = item), (item = null);
-      if (cmd) last_value = run_cmd(X, cmd, args);
-      else last_value = [OK, ""];
+      if (item !== U && cmd) args.push(item), (item = U);
+      else if (item !== U && !cmd) (cmd = item), (item = U);
+      if (cmd) {
+        last_value = run_cmd(X, cmd, args);
+        if (last_value[0] !== OK) return [i, last_value];
+      } else last_value = [OK, ""];
       return [i + 1, last_value];
     } else {
       [i, [status, item]] = next_item(X, src, i);
@@ -562,6 +541,12 @@ function tests() {
   test("", `def a [list a b c d]; get a 3`, OK, ["d"]);
   test("", `def a [list a [list 5 6 7] c d]; get a 1 2`, OK, ["7"]);
 
+  test("", `to-list {1 2 3}`, OK, ["[list 1 2 3]"]);
+  test("", `to-table {a b c d}`, OK, ["[table a b c d]"]);
+  test("", `to-table {a [ table ] c [list]}`, OK, ["[table a [table] c [list]]"]);
+
+  test("", `def a 4; def b [join " " [concat [list get] [list a]]]; b`, OK, ["4"]);
+
   test(
     "each table",
     `
@@ -571,6 +556,14 @@ function tests() {
     OK,
     ["a 1 0", "b 2 1", ""],
   );
+
+  test("", `def a 0; while {< $a 5} {put $a; set a [+ $a 1];}`, OK, ["0", "1", "2", "3", "4", ""]);
+
+  test("", `def a {return 1; return 2}; a`, OK, ["1"]);
+
+  test("", `while {< 1 2} {put 3; break}`, OK, ["3", ""]);
+  test("", `while {id 1} {break 1}`, OK, [""]);
+  test("", `while {id 1} {put 3; while {id 1} {put 4; break 2}; put 5}`, OK, ["3", "4", ""]);
 
   log(test_failures ? test_failures + " FAILURES" : "ALL TESTS PASSED");
 
