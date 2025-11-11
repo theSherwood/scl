@@ -208,9 +208,10 @@ function register_all_builtins(X) {
   });
   rb(X, "return", [0, 1], ([value]) => [RETURN, value]);
 
-  rb(X, "assert", 1, ([cond], X) => {
+  rb(X, "assert", [1, 2], ([cond, msg], X) => {
     if ((result = interpret_cmd(X, cond, 0)[1])[0] !== OK) return result;
-    return !result[1] || result[1] === "0" ? [ERR, "FAILED ASSERT: { " + cond + " }"] : [OK, ""];
+    msg = msg === undefined ? `FAILED ASSERT: { ${cond} }` : msg;
+    return !result[1] || result[1] === "0" ? [ERR, msg] : [OK, undefined];
   });
 
   rb(X, "try", 2, ([code, catch2], X) => {
@@ -229,9 +230,34 @@ function register_all_builtins(X) {
     if (status === CONTINUE && N(value) > 1) return [CONTINUE, N(value) - 1 + ""];
   }
 
-  rb(X, "if", -1, (args, X) => {
-    if (args.length < 3) return [ERR, `cmd ${cmd} expected at least 3 arguments`];
-    // TODO
+  rb(X, "if", -1, (args, X, cmd) => {
+    if (args.length < 2) return [ERR, `cmd ${cmd} expected at least 2 arguments`];
+    args = [cmd].concat(args);
+    // syntax check
+    for (let i = 1; i < args.length; i++) {
+      if (i % 3 === 0) {
+        if (args[i] === "elif") continue;
+        if (args[i] === "else") {
+          if (i !== args.length - 2) return [ERR, `cmd ${cmd} expected else to be the penultimate argument`];
+          if (typeof args[i + 1] !== "string") return [ERR, `cmd ${cmd} arg ${i} expected a string`];
+          continue;
+        }
+        log({ arg: args[i], i });
+        return [ERR, `cmd ${cmd} expected arg ${i} to be elif or else`];
+      } else {
+        if (typeof args[i] !== "string") return [ERR, `cmd ${cmd} arg ${i} expected a string`];
+      }
+    }
+    // run
+    let i = 1;
+    while (i < args.length) {
+      if ((result = interpret_cmd(X, args[i], 0)[1])[0] !== OK) return result;
+      if (!result[1] || result[1] === "0") {
+        if (args[i + 2] === "else") return interpret_cmd(X, args[i + 3], 0)[1];
+        else i += 3;
+      } else return interpret_cmd(X, args[i + 1], 0)[1];
+    }
+    return [OK, U];
   });
 
   rb(X, "while", 2, ([cond, code], X, cmd) => {
@@ -564,6 +590,11 @@ function tests() {
   test("", `while {< 1 2} {put 3; break}`, OK, ["3", ""]);
   test("", `while {id 1} {break 1}`, OK, [""]);
   test("", `while {id 1} {put 3; while {id 1} {put 4; break 2}; put 5}`, OK, ["3", "4", ""]);
+
+  test("", `def add {+ [get argv 0] [get argv 1]}; add 1 2`, OK, ["3"]);
+
+  test("", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 1} {put 3} else {put 4}]; get a`, OK, ["3", "3"]);
+  test("", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 0} {put 3} else {put 4}]; get a`, OK, ["4", "4"]);
 
   log(test_failures ? test_failures + " FAILURES" : "ALL TESTS PASSED");
 
