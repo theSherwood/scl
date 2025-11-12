@@ -17,7 +17,9 @@ const N = Number;
 const U = undefined;
 
 function lookup(X, name) {
+  // log({ wtf: 1, X, name });
   while (X) {
+    // if (name === "a") log({ X, name });
     if (X.has(name)) return [X.get(name), X];
     X = X.parent;
   }
@@ -103,6 +105,10 @@ function register_all_builtins(X) {
   rb(X, "get", [1, 1000], (args, X) => get(X, args));
   rb(X, "set", [2, 1000], ([lhs, rhs], X) => (set(X, lhs, rhs), [OK, rhs]));
   rb(X, "unset", [1, 1000], ([name], X) => (unset(X, name), [OK, undefined]));
+  rb(X, "proc", 2, ([name, code], X) => {
+    X.set(name, code);
+    return [OK, U];
+  });
 
   rb(X, "id", 1, ([name]) => [OK, name]);
   rb(X, "put", -1, (args) => (console.log(args.map((arg) => to_string(arg)).join(" ")), [OK, args[0]]));
@@ -310,6 +316,7 @@ function run_cmd(X, name, args) {
   if (!impl) return [ERR, `cmd ${name} not found`];
   if (typeof impl === "function") return impl(X, args);
   let X2 = new Map();
+  // log({ static_X_parent: static_X.parent, static_X, name });
   X2.parent = X;
   def_args(X2, args);
   let res = interpret_cmd(X2, impl, 0)[1];
@@ -395,10 +402,14 @@ function next_item(X, src, i) {
       }
       item = to_string(item) + char_arr.join("");
       i++;
-    } else {
-      [i, str] = parse_string(src, i + (c === "$"));
-      value = c === "$" ? X.get(str) : str;
+    } else if (c === "$") {
+      [i, str] = parse_string(src, i + 1);
+      [status, value] = get(X, [str]);
+      if (status !== OK) return [i, [status, value]];
       item === U ? (item = value) : (item = to_string(item) + to_string(value));
+    } else {
+      [i, str] = parse_string(src, i);
+      item === U ? (item = str) : (item = to_string(item) + str);
     }
   }
 }
@@ -531,16 +542,17 @@ function tests() {
   test("", "/ 10 0", ERR, ["cmd / expected valid numbers"]);
 
   test("", "set a {1 2 3}", OK, ["1 2 3"]);
-  test("", "set a {1 2 3}; a", ERR, ["cmd 1 not found"]);
-  test("", "set a {get a}; a", OK, ["get a"]);
+  test("", "proc a {1 2 3}", OK, [""]);
+  test("", "proc a {1 2 3}; a", ERR, ["cmd 1 not found"]);
+  test("", "proc a {get a}; a", OK, ["get a"]);
 
-  test("", "set a {size $argv}; a one two three", OK, ["3"]);
-  test("", "set a {size $argv;}; a one two three", OK, [""]);
-  test("", "set a {size $argkv}; a one two three", OK, ["0"]);
-  test("", "set a {size $argkv}; a one two -foo three -bar four", OK, ["2"]);
-  test("", "set a {get argv 1}; a one two three", OK, ["two"]);
-  test("", "set a {get argkv -foo}; a one two -foo three -bar four", OK, ["three"]);
-  test("", "set a {get argkv -foo bar}; a one two -foo [table bar 4]", OK, ["4"]);
+  test("", "proc a {size $argv}; a one two three", OK, ["3"]);
+  test("", "proc a {size $argv;}; a one two three", OK, [""]);
+  test("", "proc a {size $argkv}; a one two three", OK, ["0"]);
+  test("", "proc a {size $argkv}; a one two -foo three -bar four", OK, ["2"]);
+  test("", "proc a {get argv 1}; a one two three", OK, ["two"]);
+  test("", "proc a {get argkv -foo}; a one two -foo three -bar four", OK, ["three"]);
+  test("", "proc a {get argkv -foo bar}; a one two -foo [table bar 4]", OK, ["4"]);
 
   test("", "assert {= 1 1}", OK, [""]);
   test("", "assert {= 1 2}", ERR, ["FAILED ASSERT: { = 1 2 }"]);
@@ -555,7 +567,7 @@ function tests() {
   test("", "def a.[id foo] bar; get a.foo", OK, ["bar"]);
   test("", "def a.foo bar; get a.[id foo]", OK, ["bar"]);
 
-  test("", `set a {set b "foo bar"; get b}; a`, OK, ["foo bar"]);
+  test("", `proc a {set b "foo bar"; get b}; a`, OK, ["foo bar"]);
 
   test("", `def a [table]; size $a`, OK, ["0"]);
   test("", `def a [table a b c d]; get a a`, OK, ["b"]);
@@ -591,13 +603,13 @@ function tests() {
 
   test("", `def a 0; while {< $a 5} {put $a; set a [+ $a 1];}`, OK, ["0", "1", "2", "3", "4", ""]);
 
-  test("", `def a {return 1; return 2}; a`, OK, ["1"]);
+  test("", `proc a {return 1; return 2}; a`, OK, ["1"]);
 
   test("", `while {< 1 2} {put 3; break}`, OK, ["3", ""]);
   test("", `while {id 1} {break 1}`, OK, [""]);
   test("", `while {id 1} {put 3; while {id 1} {put 4; break 2}; put 5}`, OK, ["3", "4", ""]);
 
-  test("", `def add {+ [get argv 0] [get argv 1]}; add 1 2`, OK, ["3"]);
+  test("", `proc add {+ [get argv 0] [get argv 1]}; add 1 2`, OK, ["3"]);
 
   test("", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 1} {put 3} else {put 4}]; get a`, OK, ["3", "3"]);
   test("", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 0} {put 3} else {put 4}]; get a`, OK, ["4", "4"]);
@@ -616,6 +628,9 @@ function tests() {
   test("stack overflow", `def a {a}; a`, PANIC, ["PANIC: Maximum call stack size exceeded"]);
   test("stack overflow", `try {def a {a}; a} {put $error;}`, OK, ["Maximum call stack size exceeded", ""]);
 
+  test("", `def a 2; proc b {return $a}; b`, OK, ["2"]);
+  test("", `def a 2; proc b {return [get a]}; b`, OK, ["2"]);
+
   // TODO
   /*
   test(
@@ -627,7 +642,7 @@ function tests() {
       return {return $a}
     }
     def c [b]
-    put [c];
+    c
     id $a
     `,
     OK,
