@@ -5,55 +5,88 @@ const RETURN = 3;
 const ERR = 4;
 const PANIC = 5;
 
-const IS_PROC = 1 << 0;
-const IS_SUBCOMMAND = 1 << 1;
-const IS_BLOCK = 1 << 2;
+const IS_SUBCOMMAND = 1 << 0;
 
-let print_buffer = [];
 let log = console.log;
 
-const L = (arg, msg) => (log({ L: arg, ...(msg ? { msg } : {}) }), arg);
+const L = (arg, msg) => (console.log({ L: arg, ...(msg ? { msg } : {}) }), arg);
 const N = Number;
 const U = undefined;
 
-function lookup(X, name) {
-  // log({ wtf: 1, X, name });
+const NIL = "";
+
+const STATIC_PARENT = "outer";
+const DYN_PARENT = "dyn";
+
+let is_str = (x) => typeof x === "string";
+let is_num = (x) => x && is_str(x) && !N.isNaN(N(x));
+let is_proc = (x) => x && x.is_proc;
+let is_list = (x) => Array.isArray(x);
+let is_table = (x) => x instanceof Map;
+let is_builtin = (x) => typeof x === "function";
+let is_cmd = (x) => is_builtin(x) || is_proc(x);
+let is_int = (x) => is_num(x) && N.isInteger(N(x));
+let is_float = (x) => is_num(x) && !N.isInteger(N(x));
+
+let is_falsy = (x) => x === 0 || x === false || x === NIL || x === U;
+
+function get(X, name, parent) {
   while (X) {
-    // if (name === "a") log({ X, name });
-    if (X.has(name)) return [X.get(name), X];
-    X = X.parent;
+    if (X.has(name)) return [OK, X.get(name)];
+    X = X.get(parent);
   }
-  return [U, U];
+  return [OK, U];
+}
+function set(X, name, value, parent) {
+  // console.log("SET", { X, name, value });
+  while (X.has(parent)) {
+    if (X.has(name)) break;
+    X = X.get(parent);
+  }
+  X.set(name, value);
+}
+function unset(X, name, parent) {
+  while (X) {
+    if (X.has(name)) return X.delete(name);
+    X = X.get(parent);
+  }
 }
 
-function get(X, args) {
-  let fst = args[0];
-  let value = lookup(X, fst)[0];
-  let i = 1;
+function getin(value, args, i = 0) {
   while (i < args.length) {
-    if (typeof value === "string" || Array.isArray(value)) value = value[args[i]];
-    if (value instanceof Map) value = value.get(args[i]);
-    if (typeof value === "number") return [ERR, "numbers do not support key lookups"];
-    if (typeof value === "function") return [ERR, "builtins do not support key lookups"];
-    if (value && value.is_proc) return [ERR, "procs do not support key lookups"];
+    if (is_builtin(value) | is_proc(value)) return [ERR, "invalid collection"];
+    else if (is_str(value) || is_list(value)) value = value[args[i]];
+    else if (is_table(value)) value = value.get(args[i]);
     i++;
   }
   return [OK, value];
 }
 
-function set(X, name, value) {
-  // log({ name, value: typeof value });
-  while (X.parent) {
-    if (X.has(name)) break;
-    X = X.parent;
+function setin(coll, args, i = 0) {
+  while (i < args.length - 2) {
+    if (is_list(coll)) coll = coll[args[i]];
+    else if (is_table(coll)) coll = coll.get(args[i]);
+    else return [ERR, "invalid collection"];
+    i++;
   }
-  X.set(name, value);
+  if (!(is_table(coll) || is_list(coll))) return [ERR, "invalid collection"];
+  if (is_list(coll) && !is_int(args[i])) return [ERR, "invalid index"];
+  let value = args[args.length - 1];
+  if (is_list(coll)) coll[args[i]] = value;
+  else if (is_table(coll)) coll.set(args[i] + "", value);
+  return [OK, value];
 }
-function unset(X, name) {
-  while (X) {
-    if (X.has(name)) return X.delete(name);
-    X = X.parent;
+
+function unsetin(coll, args, i = 0) {
+  while (i < args.length - 1) {
+    if (is_list(coll)) coll = coll[args[i]];
+    else if (is_table(coll)) coll = coll.get(args[i]);
+    else return [ERR, "invalid collection"];
+    i++;
   }
+  if (!is_table(coll)) return [ERR, "invalid collection"];
+  coll.delete(args[i] + "");
+  return [OK, NIL];
 }
 
 function def_args(X, args) {
@@ -104,25 +137,38 @@ function register_all_builtins(X) {
   rb(X, "register-builtins", 1, ([table], X, cmd) => {
     if (!table instanceof Map) return [ERR, `cmd ${cmd} expected a table`];
     register_all_builtins(table);
-    return [OK, undefined];
+    return [OK, U];
   });
 
   rb(X, "def", [2, 1000], ([lhs, rhs], X) => (X.set(lhs, rhs), [OK, rhs]));
-  rb(X, "get", [1, 1000], (args, X) => get(X, args));
-  rb(X, "set", [2, 1000], ([lhs, rhs], X) => (set(X, lhs, rhs), [OK, rhs]));
-  rb(X, "unset", [1, 1000], ([name], X) => (unset(X, name), [OK, undefined]));
+
+  rb(X, "get", 1, ([name], X) => get(X, name, STATIC_PARENT));
+  rb(X, "get!", 1, ([name], X) => get(X, name, DYN_PARENT));
+  rb(X, "set", 2, ([name, value], X) => (set(X, name, value, STATIC_PARENT), [OK, value]));
+  rb(X, "set!", 2, ([name, value], X) => (set(X, name, value, DYN_PARENT), [OK, value]));
+  rb(X, "unset", 1, ([name], X) => (unset(X, name, STATIC_PARENT), [OK, U]));
+  rb(X, "unset!", 1, ([name], X) => (unset(X, name, DYN_PARENT), [OK, U]));
+
+  rb(X, "getin", [1, 1000], (args) => getin(args[0], args, 1));
+  rb(X, "setin", [1, 1000], (args) => setin(args[0], args, 1));
+  rb(X, "unsetin", [1, 1000], (args) => unsetin(args[0], args, 1));
+
   rb(X, "proc", [1, 2], ([name, code], X) => {
-    if (code === undefined) {
+    if (code === U) {
       code = name;
-      name = undefined;
+      name = U;
     }
     let proc = { name, code, X, is_proc: true };
     X.set(name, proc);
     return [OK, proc];
   });
+  rb(X, "apply", 2, ([proc, list], X) => {
+    if (typeof proc === "string") return run_cmd(X, proc, list);
+    return run_cmd_inner(X, proc, list);
+  });
 
   rb(X, "id", 1, ([name]) => [OK, name]);
-  rb(X, "put", -1, (args) => (console.log(args.map((arg) => to_string(arg)).join(" ")), [OK, args[0]]));
+  rb(X, "put", -1, (args) => (log(args.map((arg) => to_string(arg)).join(" ")), [OK, args[0]]));
 
   rb(X, "+", 2, (args, _, cmd) => to_num(cmd, N(args[0]) + N(args[1])));
   rb(X, "-", 2, (args, _, cmd) => to_num(cmd, N(args[0]) - N(args[1])));
@@ -144,10 +190,22 @@ function register_all_builtins(X) {
   rb(X, "<=str", 2, ([a, b]) => (a <= b ? "1" : "0"));
   rb(X, ">=str", 2, ([a, b]) => (a >= b ? "1" : "0"));
 
+  rb(X, "or", [1, 1000], (args) => [OK, args.some((arg) => !is_falsy(arg)) ? "1" : "0"]);
+  rb(X, "and", [1, 1000], (args) => [OK, args.every((arg) => !is_falsy(arg)) ? "1" : "0"]);
+  rb(X, "not", 1, ([arg]) => [OK, is_falsy(arg) ? "1" : "0"]);
+
+  rb(X, "is-num", 1, ([value]) => [OK, is_num(value) ? "1" : "0"]);
+  rb(X, "is-int", 1, ([value]) => [OK, is_int(value) ? "1" : "0"]);
+  rb(X, "is-str", 1, ([value]) => [OK, is_str(value) ? "1" : "0"]);
+  rb(X, "is-proc", 1, ([value]) => [OK, is_proc(value) ? "1" : "0"]);
+  rb(X, "is-list", 1, ([value]) => [OK, is_list(value) ? "1" : "0"]);
+  rb(X, "is-table", 1, ([value]) => [OK, is_table(value) ? "1" : "0"]);
+  rb(X, "is-builtin", 1, ([value]) => [OK, is_builtin(value) ? "1" : "0"]);
+  rb(X, "is-cmd", 1, ([value]) => [OK, is_cmd(value) ? "1" : "0"]);
+
   rb(X, "size", 1, ([value], X, cmd) => {
-    if (typeof value === "string") return [OK, value.length];
-    if (Array.isArray(value)) return [OK, value.length];
-    if (value instanceof Map) return [OK, value.size];
+    if (is_str(value) || is_list(value)) return [OK, value.length + ""];
+    if (is_table(value)) return [OK, value.size + ""];
     return [ERR, `cmd ${cmd} expected a string or list or table`];
   });
 
@@ -162,11 +220,11 @@ function register_all_builtins(X) {
   rb(X, "push", 2, ([list, it], X, cmd) => {
     if (!Array.isArray(list)) return [ERR, `cmd ${cmd} expected a list`];
     list.push(it);
-    return [OK, ""];
+    return [OK, U];
   });
   rb(X, "pop", 1, ([list], X, cmd) => {
     if (!Array.isArray(list)) return [ERR, `cmd ${cmd} expected a list`];
-    return [OK, list.pop() ?? ""];
+    return [OK, list.pop()];
   });
   rb(X, "concat", -1, (args, X, cmd) => {
     if (args.length < 2) return [ERR, `cmd ${cmd} expected at least 2 arguments`];
@@ -179,7 +237,8 @@ function register_all_builtins(X) {
   });
 
   rb(X, "list", -1, (args) => [OK, args]);
-  let cmd_to_list = ([code], X) => {
+  let cmd_to_list = ([code], X, cmd) => {
+    if (!is_str(code)) return [ERR, `cmd ${cmd} expected a string`];
     let values = interpret_value_list(X, code, 0);
     if (status !== OK) return [ERR, values];
     if (!Array.isArray(values)) return [ERR, `Failed to build list`];
@@ -195,7 +254,7 @@ function register_all_builtins(X) {
   };
   rb(X, "table", -1, cmd_table);
   rb(X, "to-table", 1, (args, X, cmd) => {
-    let [status, list] = cmd_to_list(args, X);
+    let [status, list] = cmd_to_list(args, X, cmd);
     if (status !== OK) return [ERR, `Failed to build table`];
     return cmd_table(list, X, cmd);
   });
@@ -206,13 +265,8 @@ function register_all_builtins(X) {
   });
 
   rb(X, "with", 2, ([table, src], X, cmd) => {
-    if (!(table instanceof Map)) return [ERR, `cmd ${cmd} expected a table`];
+    if (!is_table(table)) return [ERR, `cmd ${cmd} expected a table`];
     return interpret_cmd(table, src, 0)[1];
-  });
-
-  rb(X, "apply", 2, ([proc, list], X) => {
-    if (typeof proc === "string") return run_cmd(X, proc, list);
-    return run_cmd_inner(X, proc, list);
   });
 
   rb(X, "break", [0, 1], ([n]) => {
@@ -228,7 +282,7 @@ function register_all_builtins(X) {
   rb(X, "assert", [1, 2], ([cond, msg], X) => {
     if ((result = interpret_cmd(X, cond, 0)[1])[0] !== OK) return result;
     msg = msg === undefined ? `FAILED ASSERT: { ${cond} }` : msg;
-    return !result[1] || result[1] === "0" ? [ERR, msg] : [OK, undefined];
+    return !result[1] || result[1] === "0" ? [ERR, msg] : [OK, U];
   });
 
   rb(X, "try", 2, ([code, catch2], X) => {
@@ -245,13 +299,7 @@ function register_all_builtins(X) {
     }
   });
 
-  function handle_result_in_loop(result) {
-    let [status, value] = result;
-    if (status === ERR || status === RETURN) return result;
-    if (status === BREAK && N(value) > 1) return [BREAK, N(value) - 1 + ""];
-    if (status === BREAK) return [OK, U];
-    if (status === CONTINUE && N(value) > 1) return [CONTINUE, N(value) - 1 + ""];
-  }
+  rb(X, "do", 1, ([code], X) => interpret_cmd(X, code, 0)[1]);
 
   rb(X, "if", -1, (args, X, cmd) => {
     if (args.length < 2) return [ERR, `cmd ${cmd} expected at least 2 arguments`];
@@ -265,7 +313,6 @@ function register_all_builtins(X) {
           if (typeof args[i + 1] !== "string") return [ERR, `cmd ${cmd} arg ${i} expected a string`];
           continue;
         }
-        // log({ arg: args[i], i });
         return [ERR, `cmd ${cmd} expected arg ${i} to be elif or else`];
       } else {
         if (typeof args[i] !== "string") return [ERR, `cmd ${cmd} arg ${i} expected a string`];
@@ -283,6 +330,14 @@ function register_all_builtins(X) {
     return [OK, U];
   });
 
+  function handle_result_in_loop(result) {
+    let [status, value] = result;
+    if (status === ERR || status === RETURN) return result;
+    if (status === BREAK && N(value) > 1) return [BREAK, N(value) - 1 + ""];
+    if (status === BREAK) return [OK, U];
+    if (status === CONTINUE && N(value) > 1) return [CONTINUE, N(value) - 1 + ""];
+  }
+
   rb(X, "while", 2, ([cond, code], X, cmd) => {
     let iter = 1_0;
     while (true) {
@@ -292,7 +347,7 @@ function register_all_builtins(X) {
       result = handle_result_in_loop(interpret_cmd(X, code, 0)[1]);
       if (result) return result;
     }
-    return [OK, U];
+    return [OK, NIL];
   });
 
   rb(X, "for", 4, ([setup, cond, end, code], X) => {
@@ -306,7 +361,7 @@ function register_all_builtins(X) {
       if (result) return result;
       if ((result = interpret_cmd(X, end, 0)[1])[0] !== OK) return result;
     }
-    return [OK, U];
+    return [OK, NIL];
   });
 
   rb(X, "each", 2, ([coll, code], X, cmd) => {
@@ -320,27 +375,30 @@ function register_all_builtins(X) {
       result = handle_result_in_loop(interpret_cmd(X, code, 0)[1]);
       if (result) return result;
     }
-    return [OK, U];
+    return [OK, NIL];
   });
 }
 
 function run_cmd_inner(X, impl, args) {
-  if (typeof impl === "function") return impl(X, args);
+  if (typeof impl === "function") {
+    let [status, value] = impl(X, args);
+    return [status, value ?? NIL];
+  }
   if (!impl.is_proc) return [ERR, `${to_string(impl)} is not callable`];
   let X2 = new Map();
-  X2.parent = impl.X;
-  X2.dyn = X;
+  X2.set(STATIC_PARENT, impl.X);
+  X2.set(DYN_PARENT, X);
   def_args(X2, args);
   let res = interpret_cmd(X2, impl.code, 0)[1];
   let [status, value] = res;
-  if (status === RETURN) return [OK, value];
+  if (status === RETURN) return [OK, value ?? NIL];
   else if (status === BREAK) return [ERR, "break may not be used to break out of a procedure"];
   else if (status === CONTINUE) return [ERR, "continue may not be used to break out of a procedure"];
-  else return [status, value];
+  else return [status, value ?? NIL];
 }
 
 function run_cmd(X, name, args) {
-  let [impl] = lookup(X, name);
+  let impl = get(X, name, STATIC_PARENT)[1];
   if (!impl) return [ERR, `cmd ${name} not found`];
   return run_cmd_inner(X, impl, args);
 }
@@ -383,7 +441,6 @@ function to_string(it) {
 }
 
 function next_item(X, src, i) {
-  // log({ src, i });
   let item = (value = U);
   let status = 0;
   let str = "";
@@ -423,7 +480,7 @@ function next_item(X, src, i) {
       i++;
     } else if (c === "$") {
       [i, str] = parse_string(src, i + 1);
-      [status, value] = get(X, [str]);
+      [status, value] = get(X, str, STATIC_PARENT);
       if (status !== OK) return [i, [status, value]];
       item === U ? (item = value) : (item = to_string(item) + to_string(value));
     } else {
@@ -452,13 +509,12 @@ function interpret_value_list(X, src, i) {
 }
 
 function interpret_cmd(X, src, i, opt = 0) {
-  // log({ src, i, opt, X });
   let cmd = (str = "");
   let item = U;
   let args = [];
-  let last_value = [OK, ""];
+  let last_value = [OK, NIL];
   let len = src.length;
-  let iter = 100;
+  let iter = 1000;
   while (true) {
     if (iter-- <= 0) return [i, [ERR, "max iterations exceeded in interpreter"]];
     let c = src[i];
@@ -470,7 +526,7 @@ function interpret_cmd(X, src, i, opt = 0) {
         if (last_value[0] !== OK) return [i, last_value];
       }
       (cmd = ""), (args.length = 0);
-      if (c === ";" && last_value[0] === OK) last_value = [OK, ""];
+      if (c === ";" && last_value[0] === OK) last_value = [OK, NIL];
       if (i >= len) return [i, last_value];
       i++;
     } else if (c === " " || c === "\t") {
@@ -485,7 +541,7 @@ function interpret_cmd(X, src, i, opt = 0) {
       if (cmd) {
         last_value = run_cmd(X, cmd, args);
         if (last_value[0] !== OK) return [i, last_value];
-      } else last_value = [OK, ""];
+      } else last_value = [OK, NIL];
       return [i + 1, last_value];
     } else if (c === "#") {
       while (i < len && !"\n;".includes(src[i])) i++;
@@ -508,10 +564,10 @@ function eval(src) {
 }
 
 let test_failures = 0;
+let print_buffer = [];
 
 function test(name, src, code, values) {
   print_buffer.length = 0;
-  // log("TEST:", name || src);
   let [result_code, result_value] = eval(src);
   let all_equal = values.length === print_buffer.length + 1;
   for (let i = 0; i < print_buffer.length; i++) {
@@ -519,12 +575,12 @@ function test(name, src, code, values) {
     if (print_buffer[i] !== values[i]) all_equal = false;
   }
   if (result_code === code && result_value === values.at(-1) && all_equal) {
-    log("PASS:", name || src);
+    console.log("PASS:", name || src);
   } else {
     test_failures++;
-    log("FAIL:", name || src);
-    log("EXPECTED:", values);
-    log("ACTUAL:", [...print_buffer, result_value]);
+    console.log("FAIL:", name || src);
+    console.log("EXPECTED:", values);
+    console.log("ACTUAL:", [...print_buffer, result_value]);
   }
   print_buffer.length = 0;
 }
@@ -532,9 +588,10 @@ function test(name, src, code, values) {
 function tests() {
   test_failures = 0;
   // Send the console.logs from "put" to the buffer
-  console.log = (...args) => print_buffer.push(...args);
+  old_log = log;
+  log = (...args) => print_buffer.push(...args);
 
-  log("Start Tests");
+  console.log("Start Tests");
 
   test("", "put hello world", OK, ["hello world", "hello"]);
   test("", "put hello world;", OK, ["hello world", ""]);
@@ -569,9 +626,9 @@ function tests() {
   test("", "proc a {size $argv;}; a one two three", OK, [""]);
   test("", "proc a {size $argkv}; a one two three", OK, ["0"]);
   test("", "proc a {size $argkv}; a one two -foo three -bar four", OK, ["2"]);
-  test("", "proc a {get argv 1}; a one two three", OK, ["two"]);
-  test("", "proc a {get argkv -foo}; a one two -foo three -bar four", OK, ["three"]);
-  test("", "proc a {get argkv -foo bar}; a one two -foo [table bar 4]", OK, ["4"]);
+  test("", "proc a {getin $argv 1}; a one two three", OK, ["two"]);
+  test("", "proc a {getin $argkv -foo}; a one two -foo three -bar four", OK, ["three"]);
+  test("", "proc a {getin $argkv -foo bar}; a one two -foo [table bar 4]", OK, ["4"]);
 
   test("", "assert {= 1 1}", OK, [""]);
   test("", "assert {= 1 2}", ERR, ["FAILED ASSERT: { = 1 2 }"]);
@@ -590,20 +647,20 @@ function tests() {
   test("", `proc a {set b "foo bar"; get b}; a`, OK, ["foo bar"]);
 
   test("", `def a [table]; size $a`, OK, ["0"]);
-  test("", `def a [table a b c d]; get a a`, OK, ["b"]);
-  test("", `def a [table a b c d]; get a b`, OK, [""]);
-  test("", `def a [table a b c d]; get a c`, OK, ["d"]);
-  test("", `def a [table a b c d]; get a e f g`, OK, [""]);
+  test("", `def a [table a b c d]; getin $a a`, OK, ["b"]);
+  test("", `def a [table a b c d]; getin $a b`, OK, [""]);
+  test("", `def a [table a b c d]; getin $a c`, OK, ["d"]);
+  test("", `def a [table a b c d]; getin $a e f g`, OK, [""]);
   test("", `def a [table a b c d]; get a`, OK, ["[table a b c d]"]);
   test("", `def a [table a b]; def b $a; get b`, OK, ["[table a b]"]);
   test("", `def a [table a b c d]; size $a`, OK, ["2"]);
-  test("", `def a [table b [table c [table d 3]]]; get a b c d`, OK, ["3"]);
+  test("", `def a [table b [table c [table d 3]]]; getin $a b c d`, OK, ["3"]);
 
   test("", `def a [list]; size $a`, OK, ["0"]);
   test("", `def a [list a b c d]; size $a`, OK, ["4"]);
-  test("", `def a [list a b c d]; get a 0`, OK, ["a"]);
-  test("", `def a [list a b c d]; get a 3`, OK, ["d"]);
-  test("", `def a [list a [list 5 6 7] c d]; get a 1 2`, OK, ["7"]);
+  test("", `def a [list a b c d]; getin $a 0`, OK, ["a"]);
+  test("", `def a [list a b c d]; getin $a 3`, OK, ["d"]);
+  test("", `def a [list a [list 5 6 7] c d]; getin $a 1 2`, OK, ["7"]);
 
   test("", `to-list {1 2 3}`, OK, ["[list 1 2 3]"]);
   test("", `to-table {a b c d}`, OK, ["[table a b c d]"]);
@@ -629,7 +686,7 @@ function tests() {
   test("", `while {id 1} {break 1}`, OK, [""]);
   test("", `while {id 1} {put 3; while {id 1} {put 4; break 2}; put 5}`, OK, ["3", "4", ""]);
 
-  test("", `proc add {+ [get argv 0] [get argv 1]}; add 1 2`, OK, ["3"]);
+  test("", `proc add {+ [getin $argv 0] [getin $argv 1]}; add 1 2`, OK, ["3"]);
 
   test("", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 1} {put 3} else {put 4}]; get a`, OK, ["3", "3"]);
   test("", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 0} {put 3} else {put 4}]; get a`, OK, ["4", "4"]);
@@ -639,7 +696,7 @@ function tests() {
     "comments",
     `
     def a 1           # anything can go here
-    set a "foo#bar"   # or here
+    set a {foo#bar}   # or here
     `,
     OK,
     ["foo#bar"],
@@ -653,8 +710,8 @@ function tests() {
 
   test("", `for {def i 0} {< $i 5} {set i [+ $i 1]} {put $i;}`, OK, ["0", "1", "2", "3", "4", ""]);
 
-  test("", `proc ++ {set [get argv 0] [+ [get [get argv 0]] 1]}; def a 0; ++ a`, OK, ["1"]);
-  test("", `proc -- {set [get argv 0] [- [get [get argv 0]] 1]}; def a 0; -- a`, OK, ["-1"]);
+  test("", `proc ++ {set [getin $argv 0] [+ [get [getin $argv 0]] 1]}; def a 0; ++ a`, OK, ["1"]);
+  test("", `proc -- {set [getin $argv 0] [- [get [getin $argv 0]] 1]}; def a 0; -- a`, OK, ["-1"]);
 
   test("", `def a [list b 1 c 2]; apply $table $a`, OK, ["[table b 1 c 2]"]);
   test("", `def a [list b 1 c 2]; apply table $a`, OK, ["[table b 1 c 2]"]);
@@ -662,24 +719,153 @@ function tests() {
   test(
     "closure",
     `
-    def a 1
-    proc b {
-      def a 2
-      return [proc c {return $a}]
-    }
-    def c [b]
-    put [c]
-    id $a
-    `,
+def a 1
+proc b {
+  def a 2
+  return [proc c {return $a}]
+}
+def c [b]
+put [c]
+id $a
+`,
     OK,
     ["2", "1"],
   );
 
   test("", `def a [proc {put hello}]; get a`, OK, ["[proc {put hello}]"]);
 
-  log(test_failures ? test_failures + " FAILURES" : "ALL TESTS PASSED");
+  test("", `do {def a 3}; get a`, OK, ["3"]);
+  test("", `def a {break}; while {id 1} {put 1; do $a}`, OK, ["1", ""]);
 
-  console.log = log;
+  // TODO
+  test(
+    "jensen's device",
+    `
+proc sum {
+  assert {= [size argv] 4} {Requires 4 arguments}
+
+  def _index     [getin $argv 0]
+  def _step_size [getin $argv 1]
+  def _limit     [getin $argv 2]
+  def _body      [getin $argv 3]
+
+  assert {is-str $_index}
+  assert {is-num $_step_size}
+  assert {is-num $_limit}
+  assert {is-str $_body}
+
+  def _sum 0
+
+  def _result 0
+  for {def $_index 0} {< [get $_index] $_limit} {set $_index [+ [get $_index] $_step_size]} {
+    set _result [do $_body]
+    assert {is-num $_result} [append {Body should produce a number, not "} $_result {"}]
+    set _sum [+ $_sum $_result]       
+  }
+
+  return $_sum
+}
+
+def l [list 1 2 3 4 5]
+def m [list [list 1 2 3] [list 4 5 6]]
+
+#        idx step limit     body
+put [sum i   1    [size $l] {getin [get! l] $i}]
+put [sum i   1    10        {get i}]
+put [sum i   1    4         {* $i $i}]
+put [sum i   1    [size $m] {
+                              sum j 1 [size [getin [get! m] [get! i]]] {
+                                getin [get! m] [get! i] $j
+                              }}]
+;
+`,
+    OK,
+    ["15", "45", "14", "21", ""],
+  );
+
+  // TODO
+  test(
+    "args",
+    `
+proc Int     {assert {is-int     [getin $argv 1]} [append {arg } [getin $argv 0] { should be an integer}]}
+proc Num     {assert {is-num     [getin $argv 1]} [append {arg } [getin $argv 0] { should be a number}]}
+proc Str     {assert {is-str     [getin $argv 1]} [append {arg } [getin $argv 0] { should be a string}]}
+proc List    {assert {is-list    [getin $argv 1]} [append {arg } [getin $argv 0] { should be a list}]}
+proc Table   {assert {is-table   [getin $argv 1]} [append {arg } [getin $argv 0] { should be a table}]}
+proc Proc    {assert {is-proc    [getin $argv 1]} [append {arg } [getin $argv 0] { should be a proc}]}
+proc Builtin {assert {is-builtin [getin $argv 1]} [append {arg } [getin $argv 0] { should be a builtin}]}
+proc Cmd     {assert {is-cmd     [getin $argv 1]} [append {arg } [getin $argv 0] { should be a cmd}]}
+
+proc pr {
+  assert {= [size $argv] 3} {Requires 3 arguments}
+
+  def name [getin $argv 0]
+  def args [getin $argv 1]
+  def body [getin $argv 2]
+
+  assert {is-str $name} {First argument must be a string}
+  assert {is-str $args} {Second argument must be a string}
+  assert {is-str $body} {Third argument must be a string}
+
+  def list-args [to-list $args] 
+
+  def res {}
+  def arg {}
+  def typ {}
+  for {def i 0} {< [* $i 2] [size $list-args]} {set i [+ $i 1]} {
+    set typ [getin $list-args [* $i 2]]
+    set arg [getin $list-args [+ [* $i 2] 1]]
+    assert {is-str $typ} {Argument type must be a string}
+    assert {is-str $arg} {Argument name must be a string}
+
+    # FIXME: 
+    # assert {or [=str $typ Int] [=str $typ Num] [=str $typ Str] [=str $typ List] [=str $typ Table]} {Argument type must be one of: Int, Num, Str, List, Table}
+
+    set res [append $res {def } $arg { } {[getin $argv } $i {];}]
+    set res [append $res $typ { } $arg { $} $arg {;}]
+  }
+
+  # define the proc in the caller's environment
+  setin $dyn $name [proc [append $res { } $body]]
+  ;
+}
+
+pr add {Num a Num b} {+ $a $b}
+
+put [add 1 2]
+try {add 3 hello} {put $error}
+;
+`,
+    OK,
+    ["3", "arg b should be a number", ""],
+  );
+
+  console.log(test_failures ? test_failures + " FAILURES" : "ALL TESTS PASSED");
+
+  log = old_log;
 }
 
 tests();
+
+/**
+ * TODO
+ *
+ * - some HOF
+ *   - map
+ *   - filter
+ * - string interpolation
+ *   - fix string handling while you're at it
+ * - test out `with` and sandboxing
+ * - incr and decr
+ * - better printing/encoding
+ * - bitops
+ * - math functions?
+ * - bitops?
+ *
+ * - clean up
+ *   - common names and idents
+ *   - remove unused code
+ *   - make sure everything is defined
+ *   - compress
+ *   - typecheck builtins
+ */
