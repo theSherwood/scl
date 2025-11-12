@@ -35,6 +35,7 @@ function get(X, args) {
     if (value instanceof Map) value = value.get(args[i]);
     if (typeof value === "number") return [ERR, "numbers do not support key lookups"];
     if (typeof value === "function") return [ERR, "builtins do not support key lookups"];
+    if (value && value.is_proc) return [ERR, "procs do not support key lookups"];
     i++;
   }
   if (typeof value === "function") return [OK, "<builtin>"];
@@ -105,9 +106,14 @@ function register_all_builtins(X) {
   rb(X, "get", [1, 1000], (args, X) => get(X, args));
   rb(X, "set", [2, 1000], ([lhs, rhs], X) => (set(X, lhs, rhs), [OK, rhs]));
   rb(X, "unset", [1, 1000], ([name], X) => (unset(X, name), [OK, undefined]));
-  rb(X, "proc", 2, ([name, code], X) => {
-    X.set(name, code);
-    return [OK, U];
+  rb(X, "proc", [1, 2], ([name, code], X) => {
+    if (code === undefined) {
+      code = name;
+      name = undefined;
+    }
+    let proc = { name, code, X, is_proc: true };
+    X.set(name, proc);
+    return [OK, proc];
   });
 
   rb(X, "id", 1, ([name]) => [OK, name]);
@@ -315,11 +321,12 @@ function run_cmd(X, name, args) {
   // log("run_cmd", { name, args, impl });
   if (!impl) return [ERR, `cmd ${name} not found`];
   if (typeof impl === "function") return impl(X, args);
+  if (!impl.is_proc) return [ERR, `cmd ${name} is not a procedure`];
   let X2 = new Map();
   // log({ static_X_parent: static_X.parent, static_X, name });
-  X2.parent = X;
+  X2.parent = impl.X;
   def_args(X2, args);
-  let res = interpret_cmd(X2, impl, 0)[1];
+  let res = interpret_cmd(X2, impl.code, 0)[1];
   let [status, value] = res;
   if (status === RETURN) return [OK, value];
   else if (status === BREAK) return [ERR, "break may not be used to break out of a procedure"];
@@ -360,6 +367,7 @@ function to_string(it) {
     let str = it.map(to_string).join(" ");
     return str ? `[list ${str}]` : "[list]";
   }
+  if (it.is_proc) return `[proc ${it.name ? it.name + " " : ""}{${it.code}}]`;
   throw Error(`Unknown type of ${it}`);
 }
 
@@ -542,9 +550,9 @@ function tests() {
   test("", "/ 10 0", ERR, ["cmd / expected valid numbers"]);
 
   test("", "set a {1 2 3}", OK, ["1 2 3"]);
-  test("", "proc a {1 2 3}", OK, [""]);
+  test("", "proc a {1 2 3}", OK, ["[proc a {1 2 3}]"]);
   test("", "proc a {1 2 3}; a", ERR, ["cmd 1 not found"]);
-  test("", "proc a {get a}; a", OK, ["get a"]);
+  test("", "proc a {get a}; a", OK, ["[proc a {get a}]"]);
 
   test("", "proc a {size $argv}; a one two three", OK, ["3"]);
   test("", "proc a {size $argv;}; a one two three", OK, [""]);
@@ -589,7 +597,7 @@ function tests() {
   test("", `to-table {a b c d}`, OK, ["[table a b c d]"]);
   test("", `to-table {a [ table ] c [list]}`, OK, ["[table a [table] c [list]]"]);
 
-  test("", `def a 4; def b [join " " [concat [list get] [list a]]]; b`, OK, ["4"]);
+  test("", `def a 4; proc b [join " " [concat [list get] [list a]]]; b`, OK, ["4"]);
 
   test(
     "each table",
@@ -625,30 +633,29 @@ function tests() {
     ["foo#bar"],
   );
 
-  test("stack overflow", `def a {a}; a`, PANIC, ["PANIC: Maximum call stack size exceeded"]);
-  test("stack overflow", `try {def a {a}; a} {put $error;}`, OK, ["Maximum call stack size exceeded", ""]);
+  test("stack overflow", `proc a {a}; a`, PANIC, ["PANIC: Maximum call stack size exceeded"]);
+  test("stack overflow", `try {proc a {a}; a} {put $error;}`, OK, ["Maximum call stack size exceeded", ""]);
 
   test("", `def a 2; proc b {return $a}; b`, OK, ["2"]);
   test("", `def a 2; proc b {return [get a]}; b`, OK, ["2"]);
 
-  // TODO
-  /*
   test(
     "closure",
     `
     def a 1
-    def b {
+    proc b {
       def a 2
-      return {return $a}
+      return [proc c {return $a}]
     }
     def c [b]
-    c
+    put [c]
     id $a
     `,
     OK,
     ["2", "1"],
   );
-  */
+
+  test("", `def a [proc {put hello}]; get a`, OK, ["[proc {put hello}]"]);
 
   log(test_failures ? test_failures + " FAILURES" : "ALL TESTS PASSED");
 
