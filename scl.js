@@ -38,7 +38,6 @@ function get(X, args) {
     if (value && value.is_proc) return [ERR, "procs do not support key lookups"];
     i++;
   }
-  if (typeof value === "function") return [OK, "<builtin>"];
   return [OK, value];
 }
 
@@ -102,6 +101,12 @@ function register_num_comparison_op(X, cmd, func) {
 
 function register_all_builtins(X) {
   let rb = register_builtin;
+  rb(X, "register-builtins", 1, ([table], X, cmd) => {
+    if (!table instanceof Map) return [ERR, `cmd ${cmd} expected a table`];
+    register_all_builtins(table);
+    return [OK, undefined];
+  });
+
   rb(X, "def", [2, 1000], ([lhs, rhs], X) => (X.set(lhs, rhs), [OK, rhs]));
   rb(X, "get", [1, 1000], (args, X) => get(X, args));
   rb(X, "set", [2, 1000], ([lhs, rhs], X) => (set(X, lhs, rhs), [OK, rhs]));
@@ -205,6 +210,11 @@ function register_all_builtins(X) {
     return interpret_cmd(table, src, 0)[1];
   });
 
+  rb(X, "apply", 2, ([proc, list], X) => {
+    if (typeof proc === "string") return run_cmd(X, proc, list);
+    return run_cmd_inner(X, proc, list);
+  });
+
   rb(X, "break", [0, 1], ([n]) => {
     if (n !== undefined && (!N.isInteger(N(n)) || N(n) < 1)) return [ERR, `cmd break expected an integer`];
     return [BREAK, n];
@@ -286,17 +296,15 @@ function register_all_builtins(X) {
   });
 
   rb(X, "for", 4, ([setup, cond, end, code], X) => {
-    if ((result = interpret_cmd(X, setup, 0))[0] !== OK) return result;
+    if ((result = interpret_cmd(X, setup, 0)[1])[0] !== OK) return result;
     let iter = 1_000;
     while (true) {
       if (iter-- < 0) return [ERR, `max iterations exceeded in ${cmd} loop`];
-      if ((result = interpret_cmd(X, cond, 0))[0] !== OK) return result;
+      if ((result = interpret_cmd(X, cond, 0)[1])[0] !== OK) return result;
       if (!result[1] || result[1] === "0") break;
       result = handle_result_in_loop(interpret_cmd(X, code, 0)[1]);
       if (result) return result;
-      result = interpret_cmd(X, end, 0)[1];
-      if (result[0] === ERR || result[0] === RETURN) return result;
-      if ((result = interpret_cmd(X, setup, 0))[0] !== OK) return result;
+      if ((result = interpret_cmd(X, end, 0)[1])[0] !== OK) return result;
     }
     return [OK, U];
   });
@@ -316,15 +324,12 @@ function register_all_builtins(X) {
   });
 }
 
-function run_cmd(X, name, args) {
-  let [impl] = lookup(X, name);
-  // log("run_cmd", { name, args, impl });
-  if (!impl) return [ERR, `cmd ${name} not found`];
+function run_cmd_inner(X, impl, args) {
   if (typeof impl === "function") return impl(X, args);
-  if (!impl.is_proc) return [ERR, `cmd ${name} is not a procedure`];
+  if (!impl.is_proc) return [ERR, `${to_string(impl)} is not callable`];
   let X2 = new Map();
-  // log({ static_X_parent: static_X.parent, static_X, name });
   X2.parent = impl.X;
+  X2.dyn = X;
   def_args(X2, args);
   let res = interpret_cmd(X2, impl.code, 0)[1];
   let [status, value] = res;
@@ -332,6 +337,12 @@ function run_cmd(X, name, args) {
   else if (status === BREAK) return [ERR, "break may not be used to break out of a procedure"];
   else if (status === CONTINUE) return [ERR, "continue may not be used to break out of a procedure"];
   else return [status, value];
+}
+
+function run_cmd(X, name, args) {
+  let [impl] = lookup(X, name);
+  if (!impl) return [ERR, `cmd ${name} not found`];
+  return run_cmd_inner(X, impl, args);
 }
 
 function parse_string(src, i) {
@@ -564,6 +575,7 @@ function tests() {
 
   test("", "assert {= 1 1}", OK, [""]);
   test("", "assert {= 1 2}", ERR, ["FAILED ASSERT: { = 1 2 }"]);
+  test("", "assert {= 1 2} {Not Equal}", ERR, ["Not Equal"]);
 
   test("", "try {assert {= 1 1}} {id $error}", OK, [""]);
   test("", "try {assert {= 1 2}} {id $error}", OK, ["FAILED ASSERT: { = 1 2 }"]);
@@ -638,6 +650,14 @@ function tests() {
 
   test("", `def a 2; proc b {return $a}; b`, OK, ["2"]);
   test("", `def a 2; proc b {return [get a]}; b`, OK, ["2"]);
+
+  test("", `for {def i 0} {< $i 5} {set i [+ $i 1]} {put $i;}`, OK, ["0", "1", "2", "3", "4", ""]);
+
+  test("", `proc ++ {set [get argv 0] [+ [get [get argv 0]] 1]}; def a 0; ++ a`, OK, ["1"]);
+  test("", `proc -- {set [get argv 0] [- [get [get argv 0]] 1]}; def a 0; -- a`, OK, ["-1"]);
+
+  test("", `def a [list b 1 c 2]; apply $table $a`, OK, ["[table b 1 c 2]"]);
+  test("", `def a [list b 1 c 2]; apply table $a`, OK, ["[table b 1 c 2]"]);
 
   test(
     "closure",
