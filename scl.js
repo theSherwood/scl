@@ -729,6 +729,8 @@ id $a
     OK,
     ["2", "1"],
   );
+  test("", `proc a {def a 3; proc b {proc c {return $a}}}; def b [a]; def c [b]; c`, OK, ["3"]);
+  test("", `proc a {proc b {def a 3; proc c {return $a}}}; def b [a]; def c [b]; c`, OK, ["3"]);
 
   test("", `def a [proc {put hello}]; get a`, OK, ["[proc {put hello}]"]);
 
@@ -836,6 +838,11 @@ try {add 3 hello} {put $error}
     ["3", "arg b should be a number", ""],
   );
 
+  test("", `def t [table]; with $t {put hello};`, ERR, ["cmd put not found"]);
+  test("", `def t [table]; setin $t put $put; with $t {put hello};`, OK, ["hello", ""]);
+  test("", `def t [table]; setin $t put $put; with $t {put $t};`, OK, ["", ""]);
+  test("", `def t [table]; register-builtins $t; with $t {put hello};`, OK, ["hello", ""]);
+
   console.log(test_failures ? test_failures + " FAILURES" : "ALL TESTS PASSED");
 
   log = old_log;
@@ -851,8 +858,6 @@ tests();
  *   - filter
  * - string interpolation
  *   - fix string handling while you're at it
- * - test out `with` and sandboxing
- * - incr and decr
  * - better printing/encoding
  * - bitops
  * - math functions?
