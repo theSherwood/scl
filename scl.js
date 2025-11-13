@@ -12,9 +12,7 @@ let log = console.log;
 const L = (arg, msg) => (console.log({ L: arg, ...(msg ? { msg } : {}) }), arg);
 const N = Number;
 const U = undefined;
-
 const NIL = "";
-
 const STATIC_PARENT = "outer";
 const DYN_PARENT = "dyn";
 
@@ -28,7 +26,7 @@ let is_cmd = (x) => is_builtin(x) || is_proc(x);
 let is_int = (x) => is_num(x) && N.isInteger(N(x));
 let is_float = (x) => is_num(x) && !N.isInteger(N(x));
 
-let is_falsy = (x) => x === 0 || x === false || x === NIL || x === U;
+let is_falsy = (x) => x === 0 || x === "0" || x === false || x === NIL || x === U;
 
 function get(X, name, parent) {
   while (X) {
@@ -38,7 +36,6 @@ function get(X, name, parent) {
   return [OK, U];
 }
 function set(X, name, value, parent) {
-  // console.log("SET", { X, name, value });
   while (X.has(parent)) {
     if (X.has(name)) break;
     X = X.get(parent);
@@ -114,36 +111,26 @@ function register_builtin(X, cmd, arg_count, func) {
   });
 }
 
-function to_num(cmd, value) {
-  if (Number.isFinite(value)) return [OK, value + ""];
-  return [ERR, `cmd ${cmd} expected valid numbers`];
-}
+let to_num = (cmd, value) => (N.isFinite(value) ? [OK, value + ""] : [ERR, `cmd ${cmd} expected valid numbers`]);
 
 function get_comparison_op(func) {
   return (args, _X, cmd) => {
-    let fst = N(args[0]);
-    let snd = N(args[1]);
-    if (!(N.isFinite(fst) && N.isFinite(snd))) return [ERR, `cmd ${cmd} expected valid numbers`];
-    return [OK, func(fst, snd) ? "1" : "0"];
+    if (!(is_num(args[0]) && is_num(args[1]))) return [ERR, `cmd ${cmd} expected valid numbers`];
+    return [OK, func(N(args[0]), N(args[1])) ? "1" : "0"];
   };
 }
 
-function register_num_comparison_op(X, cmd, func) {
-  register_builtin(X, cmd, 2, get_comparison_op(func));
-}
+let register_num_comparison_op = (X, cmd, func) => register_builtin(X, cmd, 2, get_comparison_op(func));
 
 function run_cmd_inner(X, impl, args) {
-  if (typeof impl === "function") {
-    let [status, value] = impl(X, args);
-    return [status, value ?? NIL];
-  }
+  let status, value;
+  if (is_builtin(impl)) return ([status, value] = impl(X, args)), [status, value ?? NIL];
   if (!impl.is_proc) return [ERR, `${to_string(impl)} is not callable`];
   let X2 = new Map();
   X2.set(STATIC_PARENT, impl.X);
   X2.set(DYN_PARENT, X);
   def_args(X2, args);
-  let res = interpret_cmd(X2, impl.code, 0)[1];
-  let [status, value] = res;
+  [status, value] = interpret_cmd(X2, impl.code, 0)[1];
   if (status === RETURN) return [OK, value ?? NIL];
   else if (status === BREAK) return [ERR, "break may not be used to break out of a procedure"];
   else if (status === CONTINUE) return [ERR, "continue may not be used to break out of a procedure"];
@@ -165,8 +152,7 @@ function parse_string(src, i) {
       c = src[++i];
       if (i >= len) return [len, [ERR, "Unexpected end of source"]];
     }
-    char_arr.push(c);
-    i++;
+    char_arr.push(c), i++;
   }
   return [i, char_arr.join("")];
 }
@@ -348,9 +334,10 @@ function register_all_builtins(X) {
   rb(X, "-", 2, (args, _, cmd) => to_num(cmd, N(args[0]) - N(args[1])));
   rb(X, "*", 2, (args, _, cmd) => to_num(cmd, N(args[0]) * N(args[1])));
   rb(X, "/", 2, (args, _, cmd) => to_num(cmd, N(args[0]) / N(args[1])));
+  rb(X, "%", 2, (args, _, cmd) => to_num(cmd, N(args[0]) % N(args[1])));
 
   function map_value(X, name, cmd, parent, mapper) {
-    let value = get(X, name, parent);
+    let value = get(X, name, parent)[1];
     if (!is_int(value)) return [ERR, `cmd ${cmd} expected an integer`];
     set(X, name, mapper(value), parent);
     return [OK, mapper(value)];
@@ -451,12 +438,12 @@ function register_all_builtins(X) {
     return interpret_cmd(table, src, 0)[1];
   });
 
-  rb(X, "break", [0, 1], ([n]) => {
-    if (n !== undefined && (!N.isInteger(N(n)) || N(n) < 1)) return [ERR, `cmd break expected an integer`];
+  rb(X, "break", [0, 1], ([n], X, cmd) => {
+    if (n !== undefined && (!is_int(n) || N(n) < 1)) return [ERR, `cmd ${cmd} expected an integer > 0`];
     return [BREAK, n];
   });
-  rb(X, "continue", [0, 1], ([n]) => {
-    if (n !== undefined && (!N.isInteger(N(n)) || N(n) < 1)) return [ERR, `cmd break expected an integer`];
+  rb(X, "continue", [0, 1], ([n], X, cmd) => {
+    if (n !== undefined && (!is_int(n) || N(n) < 1)) return [ERR, `cmd ${cmd} expected an integer > 0`];
     return [CONTINUE, n];
   });
   rb(X, "return", [0, 1], ([value]) => [RETURN, value]);
@@ -464,21 +451,18 @@ function register_all_builtins(X) {
   rb(X, "assert", [1, 2], ([cond, msg], X) => {
     if ((result = interpret_cmd(X, cond, 0)[1])[0] !== OK) return result;
     msg = msg === undefined ? `FAILED ASSERT: { ${cond} }` : msg;
-    return !result[1] || result[1] === "0" ? [ERR, msg] : [OK, U];
+    return is_falsy(result[1]) ? [ERR, msg] : [OK, U];
   });
 
   rb(X, "try", 2, ([code, catch2], X) => {
+    let result;
     try {
-      let result = interpret_cmd(X, code, 0)[1];
-      if (result[0] === ERR) {
-        X.set("error", result[1]);
-        return interpret_cmd(X, catch2, 0)[1];
-      }
-      return result;
+      result = interpret_cmd(X, code, 0)[1];
     } catch (e) {
-      X.set("error", e.message);
-      return interpret_cmd(X, catch2, 0)[1];
+      result = [ERR, e.message];
     }
+    if (result[0] === ERR) return X.set("error", result[1]), interpret_cmd(X, catch2, 0)[1];
+    return result;
   });
 
   rb(X, "do", 1, ([code], X) => interpret_cmd(X, code, 0)[1]);
@@ -625,6 +609,11 @@ function tests() {
   test("", "/ 1 2", OK, ["0.5"]);
   test("", "/ 1 0.5", OK, ["2"]);
   test("", "/ 10 0", ERR, ["cmd / expected valid numbers"]);
+  test("", "% 11 3", OK, ["2"]);
+  test("", "% 11 16", OK, ["11"]);
+
+  test("", "def a 0; incr a; get a", OK, ["1"]);
+  test("", "def a 0; decr a; get a", OK, ["-1"]);
 
   test("", "set a {1 2 3}", OK, ["1 2 3"]);
   test("", "proc a {1 2 3}", OK, ["[proc a {1 2 3}]"]);
