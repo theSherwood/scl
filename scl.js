@@ -132,253 +132,6 @@ function register_num_comparison_op(X, cmd, func) {
   register_builtin(X, cmd, 2, get_comparison_op(func));
 }
 
-function register_all_builtins(X) {
-  let rb = register_builtin;
-  rb(X, "register-builtins", 1, ([table], X, cmd) => {
-    if (!table instanceof Map) return [ERR, `cmd ${cmd} expected a table`];
-    register_all_builtins(table);
-    return [OK, U];
-  });
-
-  rb(X, "def", [2, 1000], ([lhs, rhs], X) => (X.set(lhs, rhs), [OK, rhs]));
-
-  rb(X, "get", 1, ([name], X) => get(X, name, STATIC_PARENT));
-  rb(X, "get!", 1, ([name], X) => get(X, name, DYN_PARENT));
-  rb(X, "set", 2, ([name, value], X) => (set(X, name, value, STATIC_PARENT), [OK, value]));
-  rb(X, "set!", 2, ([name, value], X) => (set(X, name, value, DYN_PARENT), [OK, value]));
-  rb(X, "unset", 1, ([name], X) => (unset(X, name, STATIC_PARENT), [OK, U]));
-  rb(X, "unset!", 1, ([name], X) => (unset(X, name, DYN_PARENT), [OK, U]));
-
-  rb(X, "getin", [1, 1000], (args) => getin(args[0], args, 1));
-  rb(X, "setin", [1, 1000], (args) => setin(args[0], args, 1));
-  rb(X, "unsetin", [1, 1000], (args) => unsetin(args[0], args, 1));
-
-  rb(X, "proc", [1, 2], ([name, code], X) => {
-    if (code === U) {
-      code = name;
-      name = U;
-    }
-    let proc = { name, code, X, is_proc: true };
-    X.set(name, proc);
-    return [OK, proc];
-  });
-  rb(X, "apply", 2, ([proc, list], X) => {
-    if (typeof proc === "string") return run_cmd(X, proc, list);
-    return run_cmd_inner(X, proc, list);
-  });
-
-  rb(X, "id", 1, ([name]) => [OK, name]);
-  rb(X, "put", -1, (args) => (log(args.map((arg) => to_string(arg)).join(" ")), [OK, args[0]]));
-
-  rb(X, "+", 2, (args, _, cmd) => to_num(cmd, N(args[0]) + N(args[1])));
-  rb(X, "-", 2, (args, _, cmd) => to_num(cmd, N(args[0]) - N(args[1])));
-  rb(X, "*", 2, (args, _, cmd) => to_num(cmd, N(args[0]) * N(args[1])));
-  rb(X, "/", 2, (args, _, cmd) => to_num(cmd, N(args[0]) / N(args[1])));
-
-  let rnco = register_num_comparison_op;
-  rnco(X, "=", (a, b) => a === b);
-  rnco(X, "!=", (a, b) => a !== b);
-  rnco(X, "<", (a, b) => a < b);
-  rnco(X, ">", (a, b) => a > b);
-  rnco(X, "<=", (a, b) => a <= b);
-  rnco(X, ">=", (a, b) => a >= b);
-
-  rb(X, "=str", 2, ([a, b]) => (a === b ? "1" : "0"));
-  rb(X, "!=str", 2, ([a, b]) => (a !== b ? "1" : "0"));
-  rb(X, "<str", 2, ([a, b]) => (a < b ? "1" : "0"));
-  rb(X, ">str", 2, ([a, b]) => (a > b ? "1" : "0"));
-  rb(X, "<=str", 2, ([a, b]) => (a <= b ? "1" : "0"));
-  rb(X, ">=str", 2, ([a, b]) => (a >= b ? "1" : "0"));
-
-  rb(X, "or", [1, 1000], (args) => [OK, args.some((arg) => !is_falsy(arg)) ? "1" : "0"]);
-  rb(X, "and", [1, 1000], (args) => [OK, args.every((arg) => !is_falsy(arg)) ? "1" : "0"]);
-  rb(X, "not", 1, ([arg]) => [OK, is_falsy(arg) ? "1" : "0"]);
-
-  rb(X, "is-num", 1, ([value]) => [OK, is_num(value) ? "1" : "0"]);
-  rb(X, "is-int", 1, ([value]) => [OK, is_int(value) ? "1" : "0"]);
-  rb(X, "is-str", 1, ([value]) => [OK, is_str(value) ? "1" : "0"]);
-  rb(X, "is-proc", 1, ([value]) => [OK, is_proc(value) ? "1" : "0"]);
-  rb(X, "is-list", 1, ([value]) => [OK, is_list(value) ? "1" : "0"]);
-  rb(X, "is-table", 1, ([value]) => [OK, is_table(value) ? "1" : "0"]);
-  rb(X, "is-builtin", 1, ([value]) => [OK, is_builtin(value) ? "1" : "0"]);
-  rb(X, "is-cmd", 1, ([value]) => [OK, is_cmd(value) ? "1" : "0"]);
-
-  rb(X, "size", 1, ([value], X, cmd) => {
-    if (is_str(value) || is_list(value)) return [OK, value.length + ""];
-    if (is_table(value)) return [OK, value.size + ""];
-    return [ERR, `cmd ${cmd} expected a string or list or table`];
-  });
-
-  rb(X, "append", -1, (args) => [OK, args?.join("")]);
-  rb(X, "split", 3, ([sep, str]) => [OK, str.split(sep)]);
-  rb(X, "at", 2, ([i, str]) => [OK, str[i]]);
-  rb(X, "slice", 3, ([start, end, str], _X, cmd) => {
-    if (!(N.isFinite(N(start)) && N.isFinite(N(end)))) return [ERR, `cmd ${cmd} expected valid numbers`];
-    return [OK, str.slice(start, end)];
-  });
-
-  rb(X, "push", 2, ([list, it], X, cmd) => {
-    if (!Array.isArray(list)) return [ERR, `cmd ${cmd} expected a list`];
-    list.push(it);
-    return [OK, U];
-  });
-  rb(X, "pop", 1, ([list], X, cmd) => {
-    if (!Array.isArray(list)) return [ERR, `cmd ${cmd} expected a list`];
-    return [OK, list.pop()];
-  });
-  rb(X, "concat", -1, (args, X, cmd) => {
-    if (args.length < 2) return [ERR, `cmd ${cmd} expected at least 2 arguments`];
-    if (args.some((arg) => !Array.isArray(arg))) return [ERR, `cmd ${cmd} expected lists`];
-    return [OK, args.flat()];
-  });
-  rb(X, "join", 2, ([sep, list], X, cmd) => {
-    if (!Array.isArray(list)) return [ERR, `cmd ${cmd} expected a list`];
-    return [OK, list.join(sep)];
-  });
-
-  rb(X, "list", -1, (args) => [OK, args]);
-  let cmd_to_list = ([code], X, cmd) => {
-    if (!is_str(code)) return [ERR, `cmd ${cmd} expected a string`];
-    let values = interpret_value_list(X, code, 0);
-    if (status !== OK) return [ERR, values];
-    if (!Array.isArray(values)) return [ERR, `Failed to build list`];
-    return [OK, values];
-  };
-  rb(X, "to-list", 1, cmd_to_list);
-
-  let cmd_table = (args, X, cmd) => {
-    if (args.length % 2 !== 0) return [ERR, `cmd ${cmd} expected even number of arguments`];
-    let table = new Map();
-    for (let i = 0; i < args.length; i += 2) table.set(args[i], args[i + 1]);
-    return [OK, table];
-  };
-  rb(X, "table", -1, cmd_table);
-  rb(X, "to-table", 1, (args, X, cmd) => {
-    let [status, list] = cmd_to_list(args, X, cmd);
-    if (status !== OK) return [ERR, `Failed to build table`];
-    return cmd_table(list, X, cmd);
-  });
-
-  rb(X, "delete", 1, ([obj], X) => {
-    [...X.entries()].forEach(([key]) => (key.startsWith(obj + ".") ? X.delete(key) : undefined));
-    return [OK, U];
-  });
-
-  rb(X, "with", 2, ([table, src], X, cmd) => {
-    if (!is_table(table)) return [ERR, `cmd ${cmd} expected a table`];
-    return interpret_cmd(table, src, 0)[1];
-  });
-
-  rb(X, "break", [0, 1], ([n]) => {
-    if (n !== undefined && (!N.isInteger(N(n)) || N(n) < 1)) return [ERR, `cmd break expected an integer`];
-    return [BREAK, n];
-  });
-  rb(X, "continue", [0, 1], ([n]) => {
-    if (n !== undefined && (!N.isInteger(N(n)) || N(n) < 1)) return [ERR, `cmd break expected an integer`];
-    return [CONTINUE, n];
-  });
-  rb(X, "return", [0, 1], ([value]) => [RETURN, value]);
-
-  rb(X, "assert", [1, 2], ([cond, msg], X) => {
-    if ((result = interpret_cmd(X, cond, 0)[1])[0] !== OK) return result;
-    msg = msg === undefined ? `FAILED ASSERT: { ${cond} }` : msg;
-    return !result[1] || result[1] === "0" ? [ERR, msg] : [OK, U];
-  });
-
-  rb(X, "try", 2, ([code, catch2], X) => {
-    try {
-      let result = interpret_cmd(X, code, 0)[1];
-      if (result[0] === ERR) {
-        X.set("error", result[1]);
-        return interpret_cmd(X, catch2, 0)[1];
-      }
-      return result;
-    } catch (e) {
-      X.set("error", e.message);
-      return interpret_cmd(X, catch2, 0)[1];
-    }
-  });
-
-  rb(X, "do", 1, ([code], X) => interpret_cmd(X, code, 0)[1]);
-
-  rb(X, "if", -1, (args, X, cmd) => {
-    if (args.length < 2) return [ERR, `cmd ${cmd} expected at least 2 arguments`];
-    args = [cmd].concat(args);
-    // syntax check
-    for (let i = 1; i < args.length; i++) {
-      if (i % 3 === 0) {
-        if (args[i] === "elif") continue;
-        if (args[i] === "else") {
-          if (i !== args.length - 2) return [ERR, `cmd ${cmd} expected else to be the penultimate argument`];
-          if (typeof args[i + 1] !== "string") return [ERR, `cmd ${cmd} arg ${i} expected a string`];
-          continue;
-        }
-        return [ERR, `cmd ${cmd} expected arg ${i} to be elif or else`];
-      } else {
-        if (typeof args[i] !== "string") return [ERR, `cmd ${cmd} arg ${i} expected a string`];
-      }
-    }
-    // run
-    let i = 1;
-    while (i < args.length) {
-      if ((result = interpret_cmd(X, args[i], 0)[1])[0] !== OK) return result;
-      if (!result[1] || result[1] === "0") {
-        if (args[i + 2] === "else") return interpret_cmd(X, args[i + 3], 0)[1];
-        else i += 3;
-      } else return interpret_cmd(X, args[i + 1], 0)[1];
-    }
-    return [OK, U];
-  });
-
-  function handle_result_in_loop(result) {
-    let [status, value] = result;
-    if (status === ERR || status === RETURN) return result;
-    if (status === BREAK && N(value) > 1) return [BREAK, N(value) - 1 + ""];
-    if (status === BREAK) return [OK, U];
-    if (status === CONTINUE && N(value) > 1) return [CONTINUE, N(value) - 1 + ""];
-  }
-
-  rb(X, "while", 2, ([cond, code], X, cmd) => {
-    let iter = 1_0;
-    while (true) {
-      if (iter-- < 0) return [ERR, `max iterations exceeded in ${cmd} loop`];
-      if ((result = interpret_cmd(X, cond, 0)[1])[0] !== OK) return result;
-      if (!result[1] || result[1] === "0") break;
-      result = handle_result_in_loop(interpret_cmd(X, code, 0)[1]);
-      if (result) return result;
-    }
-    return [OK, NIL];
-  });
-
-  rb(X, "for", 4, ([setup, cond, end, code], X) => {
-    if ((result = interpret_cmd(X, setup, 0)[1])[0] !== OK) return result;
-    let iter = 1_000;
-    while (true) {
-      if (iter-- < 0) return [ERR, `max iterations exceeded in ${cmd} loop`];
-      if ((result = interpret_cmd(X, cond, 0)[1])[0] !== OK) return result;
-      if (!result[1] || result[1] === "0") break;
-      result = handle_result_in_loop(interpret_cmd(X, code, 0)[1]);
-      if (result) return result;
-      if ((result = interpret_cmd(X, end, 0)[1])[0] !== OK) return result;
-    }
-    return [OK, NIL];
-  });
-
-  rb(X, "each", 2, ([coll, code], X, cmd) => {
-    let is_table = coll instanceof Map;
-    if (!(coll instanceof Map || Array.isArray(coll))) return [ERR, `cmd ${cmd} expected a list or table`];
-    let items = Array.isArray(coll) ? coll : Array.from(coll.entries());
-    for (let i = 0; i < items.length; i++) {
-      let item = items[i];
-      if (is_table) X.set("key", item[0]), X.set("it", item[1]), X.set("i", i);
-      else X.set("it", item), X.set("i", i);
-      result = handle_result_in_loop(interpret_cmd(X, code, 0)[1]);
-      if (result) return result;
-    }
-    return [OK, NIL];
-  });
-}
-
 function run_cmd_inner(X, impl, args) {
   if (typeof impl === "function") {
     let [status, value] = impl(X, args);
@@ -550,6 +303,262 @@ function interpret_cmd(X, src, i, opt = 0) {
       if (status !== OK) return [i, [status, item]];
     }
   }
+}
+
+function register_all_builtins(X) {
+  let rb = register_builtin;
+  rb(X, "register-builtins", 1, ([table], X, cmd) => {
+    if (!table instanceof Map) return [ERR, `cmd ${cmd} expected a table`];
+    register_all_builtins(table);
+    return [OK, U];
+  });
+
+  rb(X, "def", [2, 1000], ([lhs, rhs], X) => (X.set(lhs, rhs), [OK, rhs]));
+
+  rb(X, "get", 1, ([name], X) => get(X, name, STATIC_PARENT));
+  rb(X, "set", 2, ([name, value], X) => (set(X, name, value, STATIC_PARENT), [OK, value]));
+  rb(X, "unset", 1, ([name], X) => (unset(X, name, STATIC_PARENT), [OK, U]));
+
+  rb(X, "get!", 1, ([name], X) => get(X, name, DYN_PARENT));
+  rb(X, "set!", 2, ([name, value], X) => (set(X, name, value, DYN_PARENT), [OK, value]));
+  rb(X, "unset!", 1, ([name], X) => (unset(X, name, DYN_PARENT), [OK, U]));
+
+  rb(X, "getin", [1, 1000], (args) => getin(args[0], args, 1));
+  rb(X, "setin", [1, 1000], (args) => setin(args[0], args, 1));
+  rb(X, "unsetin", [1, 1000], (args) => unsetin(args[0], args, 1));
+
+  rb(X, "proc", [1, 2], ([name, code], X) => {
+    if (code === U) {
+      code = name;
+      name = U;
+    }
+    let proc = { name, code, X, is_proc: true };
+    X.set(name, proc);
+    return [OK, proc];
+  });
+  rb(X, "apply", 2, ([proc, list], X) => {
+    if (typeof proc === "string") return run_cmd(X, proc, list);
+    return run_cmd_inner(X, proc, list);
+  });
+
+  rb(X, "id", 1, ([name]) => [OK, name]);
+  rb(X, "put", -1, (args) => (log(args.map((arg) => to_string(arg)).join(" ")), [OK, args[0]]));
+
+  rb(X, "+", 2, (args, _, cmd) => to_num(cmd, N(args[0]) + N(args[1])));
+  rb(X, "-", 2, (args, _, cmd) => to_num(cmd, N(args[0]) - N(args[1])));
+  rb(X, "*", 2, (args, _, cmd) => to_num(cmd, N(args[0]) * N(args[1])));
+  rb(X, "/", 2, (args, _, cmd) => to_num(cmd, N(args[0]) / N(args[1])));
+
+  function map_value(X, name, cmd, parent, mapper) {
+    let value = get(X, name, parent);
+    if (!is_int(value)) return [ERR, `cmd ${cmd} expected an integer`];
+    set(X, name, mapper(value), parent);
+    return [OK, mapper(value)];
+  }
+
+  rb(X, "incr", 1, ([name], X, cmd) => map_value(X, name, cmd, STATIC_PARENT, (x) => N(x) + 1 + ""));
+  rb(X, "decr", 1, ([name], X, cmd) => map_value(X, name, cmd, STATIC_PARENT, (x) => N(x) - 1 + ""));
+
+  rb(X, "incr!", 1, ([name], X, cmd) => map_value(X, name, cmd, DYN_PARENT, (x) => N(x) + 1 + ""));
+  rb(X, "decr!", 1, ([name], X, cmd) => map_value(X, name, cmd, DYN_PARENT, (x) => N(x) - 1 + ""));
+
+  let rnco = register_num_comparison_op;
+  rnco(X, "=", (a, b) => a === b);
+  rnco(X, "!=", (a, b) => a !== b);
+  rnco(X, "<", (a, b) => a < b);
+  rnco(X, ">", (a, b) => a > b);
+  rnco(X, "<=", (a, b) => a <= b);
+  rnco(X, ">=", (a, b) => a >= b);
+
+  rb(X, "=str", 2, ([a, b]) => (a === b ? "1" : "0"));
+  rb(X, "!=str", 2, ([a, b]) => (a !== b ? "1" : "0"));
+  rb(X, "<str", 2, ([a, b]) => (a < b ? "1" : "0"));
+  rb(X, ">str", 2, ([a, b]) => (a > b ? "1" : "0"));
+  rb(X, "<=str", 2, ([a, b]) => (a <= b ? "1" : "0"));
+  rb(X, ">=str", 2, ([a, b]) => (a >= b ? "1" : "0"));
+
+  rb(X, "or", [1, 1000], (args) => [OK, args.some((arg) => !is_falsy(arg)) ? "1" : "0"]);
+  rb(X, "and", [1, 1000], (args) => [OK, args.every((arg) => !is_falsy(arg)) ? "1" : "0"]);
+  rb(X, "not", 1, ([arg]) => [OK, is_falsy(arg) ? "1" : "0"]);
+
+  rb(X, "is-num", 1, ([value]) => [OK, is_num(value) ? "1" : "0"]);
+  rb(X, "is-int", 1, ([value]) => [OK, is_int(value) ? "1" : "0"]);
+  rb(X, "is-str", 1, ([value]) => [OK, is_str(value) ? "1" : "0"]);
+  rb(X, "is-proc", 1, ([value]) => [OK, is_proc(value) ? "1" : "0"]);
+  rb(X, "is-list", 1, ([value]) => [OK, is_list(value) ? "1" : "0"]);
+  rb(X, "is-table", 1, ([value]) => [OK, is_table(value) ? "1" : "0"]);
+  rb(X, "is-builtin", 1, ([value]) => [OK, is_builtin(value) ? "1" : "0"]);
+  rb(X, "is-cmd", 1, ([value]) => [OK, is_cmd(value) ? "1" : "0"]);
+
+  rb(X, "size", 1, ([value], X, cmd) => {
+    if (is_str(value) || is_list(value)) return [OK, value.length + ""];
+    if (is_table(value)) return [OK, value.size + ""];
+    return [ERR, `cmd ${cmd} expected a string or list or table`];
+  });
+
+  rb(X, "append", -1, (args) => [OK, args?.join("")]);
+  rb(X, "split", 3, ([sep, str]) => [OK, str.split(sep)]);
+  rb(X, "at", 2, ([i, str]) => [OK, str[i]]);
+  rb(X, "slice", 3, ([start, end, str], _X, cmd) => {
+    if (!(N.isFinite(N(start)) && N.isFinite(N(end)))) return [ERR, `cmd ${cmd} expected valid numbers`];
+    return [OK, str.slice(start, end)];
+  });
+
+  rb(X, "push", 2, ([list, it], X, cmd) => {
+    if (!Array.isArray(list)) return [ERR, `cmd ${cmd} expected a list`];
+    list.push(it);
+    return [OK, U];
+  });
+  rb(X, "pop", 1, ([list], X, cmd) => {
+    if (!Array.isArray(list)) return [ERR, `cmd ${cmd} expected a list`];
+    return [OK, list.pop()];
+  });
+  rb(X, "concat", -1, (args, X, cmd) => {
+    if (args.length < 2) return [ERR, `cmd ${cmd} expected at least 2 arguments`];
+    if (args.some((arg) => !Array.isArray(arg))) return [ERR, `cmd ${cmd} expected lists`];
+    return [OK, args.flat()];
+  });
+  rb(X, "join", 2, ([sep, list], X, cmd) => {
+    if (!Array.isArray(list)) return [ERR, `cmd ${cmd} expected a list`];
+    return [OK, list.join(sep)];
+  });
+
+  rb(X, "list", -1, (args) => [OK, args]);
+  let cmd_to_list = ([code], X, cmd) => {
+    if (!is_str(code)) return [ERR, `cmd ${cmd} expected a string`];
+    let values = interpret_value_list(X, code, 0);
+    if (status !== OK) return [ERR, values];
+    if (!Array.isArray(values)) return [ERR, `Failed to build list`];
+    return [OK, values];
+  };
+  rb(X, "to-list", 1, cmd_to_list);
+
+  let cmd_table = (args, X, cmd) => {
+    if (args.length % 2 !== 0) return [ERR, `cmd ${cmd} expected even number of arguments`];
+    let table = new Map();
+    for (let i = 0; i < args.length; i += 2) table.set(args[i], args[i + 1]);
+    return [OK, table];
+  };
+  rb(X, "table", -1, cmd_table);
+  rb(X, "to-table", 1, (args, X, cmd) => {
+    let [status, list] = cmd_to_list(args, X, cmd);
+    if (status !== OK) return [ERR, `Failed to build table`];
+    return cmd_table(list, X, cmd);
+  });
+
+  rb(X, "with", 2, ([table, src], X, cmd) => {
+    if (!is_table(table)) return [ERR, `cmd ${cmd} expected a table`];
+    return interpret_cmd(table, src, 0)[1];
+  });
+
+  rb(X, "break", [0, 1], ([n]) => {
+    if (n !== undefined && (!N.isInteger(N(n)) || N(n) < 1)) return [ERR, `cmd break expected an integer`];
+    return [BREAK, n];
+  });
+  rb(X, "continue", [0, 1], ([n]) => {
+    if (n !== undefined && (!N.isInteger(N(n)) || N(n) < 1)) return [ERR, `cmd break expected an integer`];
+    return [CONTINUE, n];
+  });
+  rb(X, "return", [0, 1], ([value]) => [RETURN, value]);
+
+  rb(X, "assert", [1, 2], ([cond, msg], X) => {
+    if ((result = interpret_cmd(X, cond, 0)[1])[0] !== OK) return result;
+    msg = msg === undefined ? `FAILED ASSERT: { ${cond} }` : msg;
+    return !result[1] || result[1] === "0" ? [ERR, msg] : [OK, U];
+  });
+
+  rb(X, "try", 2, ([code, catch2], X) => {
+    try {
+      let result = interpret_cmd(X, code, 0)[1];
+      if (result[0] === ERR) {
+        X.set("error", result[1]);
+        return interpret_cmd(X, catch2, 0)[1];
+      }
+      return result;
+    } catch (e) {
+      X.set("error", e.message);
+      return interpret_cmd(X, catch2, 0)[1];
+    }
+  });
+
+  rb(X, "do", 1, ([code], X) => interpret_cmd(X, code, 0)[1]);
+
+  rb(X, "if", -1, (args, X, cmd) => {
+    if (args.length < 2) return [ERR, `cmd ${cmd} expected at least 2 arguments`];
+    args = [cmd].concat(args);
+    // syntax check
+    for (let i = 1; i < args.length; i++) {
+      if (i % 3 === 0) {
+        if (args[i] === "elif") continue;
+        if (args[i] === "else") {
+          if (i !== args.length - 2) return [ERR, `cmd ${cmd} expected else to be the penultimate argument`];
+          if (typeof args[i + 1] !== "string") return [ERR, `cmd ${cmd} arg ${i} expected a string`];
+          continue;
+        }
+        return [ERR, `cmd ${cmd} expected arg ${i} to be elif or else`];
+      } else {
+        if (typeof args[i] !== "string") return [ERR, `cmd ${cmd} arg ${i} expected a string`];
+      }
+    }
+    // run
+    let i = 1;
+    while (i < args.length) {
+      if ((result = interpret_cmd(X, args[i], 0)[1])[0] !== OK) return result;
+      if (!result[1] || result[1] === "0") {
+        if (args[i + 2] === "else") return interpret_cmd(X, args[i + 3], 0)[1];
+        else i += 3;
+      } else return interpret_cmd(X, args[i + 1], 0)[1];
+    }
+    return [OK, U];
+  });
+
+  function handle_result_in_loop(result) {
+    let [status, value] = result;
+    if (status === ERR || status === RETURN) return result;
+    if (status === BREAK && N(value) > 1) return [BREAK, N(value) - 1 + ""];
+    if (status === BREAK) return [OK, U];
+    if (status === CONTINUE && N(value) > 1) return [CONTINUE, N(value) - 1 + ""];
+  }
+
+  rb(X, "while", 2, ([cond, code], X, cmd) => {
+    let iter = 1_0;
+    while (true) {
+      if (iter-- < 0) return [ERR, `max iterations exceeded in ${cmd} loop`];
+      if ((result = interpret_cmd(X, cond, 0)[1])[0] !== OK) return result;
+      if (!result[1] || result[1] === "0") break;
+      result = handle_result_in_loop(interpret_cmd(X, code, 0)[1]);
+      if (result) return result;
+    }
+    return [OK, NIL];
+  });
+
+  rb(X, "for", 4, ([setup, cond, end, code], X) => {
+    if ((result = interpret_cmd(X, setup, 0)[1])[0] !== OK) return result;
+    let iter = 1_000;
+    while (true) {
+      if (iter-- < 0) return [ERR, `max iterations exceeded in ${cmd} loop`];
+      if ((result = interpret_cmd(X, cond, 0)[1])[0] !== OK) return result;
+      if (!result[1] || result[1] === "0") break;
+      result = handle_result_in_loop(interpret_cmd(X, code, 0)[1]);
+      if (result) return result;
+      if ((result = interpret_cmd(X, end, 0)[1])[0] !== OK) return result;
+    }
+    return [OK, NIL];
+  });
+
+  rb(X, "each", 2, ([coll, code], X, cmd) => {
+    let is_table = coll instanceof Map;
+    if (!(coll instanceof Map || Array.isArray(coll))) return [ERR, `cmd ${cmd} expected a list or table`];
+    let items = Array.isArray(coll) ? coll : Array.from(coll.entries());
+    for (let i = 0; i < items.length; i++) {
+      let item = items[i];
+      if (is_table) X.set("key", item[0]), X.set("it", item[1]), X.set("i", i);
+      else X.set("it", item), X.set("i", i);
+      result = handle_result_in_loop(interpret_cmd(X, code, 0)[1]);
+      if (result) return result;
+    }
+    return [OK, NIL];
+  });
 }
 
 function eval(src) {
@@ -737,7 +746,6 @@ id $a
   test("", `do {def a 3}; get a`, OK, ["3"]);
   test("", `def a {break}; while {id 1} {put 1; do $a}`, OK, ["1", ""]);
 
-  // TODO
   test(
     "jensen's device",
     `
@@ -783,9 +791,8 @@ put [sum i   1    [size $m] {
     ["15", "45", "14", "21", ""],
   );
 
-  // TODO
   test(
-    "args",
+    "typed procs",
     `
 proc Int     {assert {is-int     [getin $argv 1]} [append {arg } [getin $argv 0] { should be an integer}]}
 proc Num     {assert {is-num     [getin $argv 1]} [append {arg } [getin $argv 0] { should be a number}]}
@@ -815,13 +822,13 @@ proc pr {
   for {def i 0} {< [* $i 2] [size $list-args]} {set i [+ $i 1]} {
     set typ [getin $list-args [* $i 2]]
     set arg [getin $list-args [+ [* $i 2] 1]]
-    assert {is-str $typ} {Argument type must be a string}
+
+    assert {and [is-str $typ] [is-cmd [get! $typ]]} {Type argument must be the name of a cmd}
     assert {is-str $arg} {Argument name must be a string}
 
-    # FIXME: 
-    # assert {or [=str $typ Int] [=str $typ Num] [=str $typ Str] [=str $typ List] [=str $typ Table]} {Argument type must be one of: Int, Num, Str, List, Table}
-
+    # define the parameter name
     set res [append $res {def } $arg { } {[getin $argv } $i {];}]
+    # add type assertion for parameter
     set res [append $res $typ { } $arg { $} $arg {;}]
   }
 
@@ -861,6 +868,7 @@ tests();
  * - bitops
  * - math functions?
  * - bitops?
+ * - using \ at the end of a line to join lines
  *
  * - clean up
  *   - common names and idents
