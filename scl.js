@@ -122,7 +122,9 @@ function get_comparison_op(func) {
 
 let register_num_comparison_op = (X, cmd, func) => register_builtin(X, cmd, 2, get_comparison_op(func));
 
-function run_cmd_inner(X, impl, args) {
+function run_cmd(X, cmd, args) {
+  let impl = is_str(cmd) ? get(X, cmd, STATIC_PARENT)[1] : cmd;
+  if (!impl) return [ERR, `cmd "${to_string(cmd)}" not found`];
   let status, value;
   if (is_builtin(impl)) return ([status, value] = impl(X, args)), [status, value ?? NIL];
   if (!impl.is_proc) return [ERR, `${to_string(impl)} is not callable`];
@@ -135,12 +137,6 @@ function run_cmd_inner(X, impl, args) {
   else if (status === BREAK) return [ERR, "break may not be used to break out of a procedure"];
   else if (status === CONTINUE) return [ERR, "continue may not be used to break out of a procedure"];
   else return [status, value ?? NIL];
-}
-
-function run_cmd(X, name, args) {
-  let impl = get(X, name, STATIC_PARENT)[1];
-  if (!impl) return [ERR, `cmd ${name} not found`];
-  return run_cmd_inner(X, impl, args);
 }
 
 function parse_string(src, i) {
@@ -322,10 +318,7 @@ function register_all_builtins(X) {
     X.set(name, proc);
     return [OK, proc];
   });
-  rb(X, "apply", 2, ([proc, list], X) => {
-    if (typeof proc === "string") return run_cmd(X, proc, list);
-    return run_cmd_inner(X, proc, list);
-  });
+  rb(X, "apply", 2, ([proc, list], X) => run_cmd(X, proc, list));
 
   rb(X, "id", 1, ([name]) => [OK, name]);
   rb(X, "put", -1, (args) => (log(args.map((arg) => to_string(arg)).join(" ")), [OK, args[0]]));
@@ -563,6 +556,7 @@ let print_buffer = [];
 function test(name, src, code, values) {
   print_buffer.length = 0;
   let [result_code, result_value] = eval(src);
+  // console.log({ result_code, result_value, values });
   let all_equal = values.length === print_buffer.length + 1;
   for (let i = 0; i < print_buffer.length; i++) {
     if (all_equal === false) break;
@@ -618,7 +612,7 @@ function tests() {
 
   test("", "set a {1 2 3}", OK, ["1 2 3"]);
   test("", "proc a {1 2 3}", OK, ["[proc a {1 2 3}]"]);
-  test("", "proc a {1 2 3}; a", ERR, ["cmd 1 not found"]);
+  test("", "proc a {1 2 3}; a", ERR, ['cmd "1" not found']);
   test("", "proc a {get a}; a", OK, ["[proc a {get a}]"]);
 
   test("", "proc a {size $argv}; a one two three", OK, ["3"]);
@@ -839,7 +833,7 @@ try {add 3 hello} {put $error}
     ["3", "arg b should be a number", ""],
   );
 
-  test("", `def t [table]; with $t {put hello};`, ERR, ["cmd put not found"]);
+  test("", `def t [table]; with $t {put hello};`, ERR, ['cmd "put" not found']);
   test("", `def t [table]; setin $t put $put; with $t {put hello};`, OK, ["hello", ""]);
   test("", `def t [table]; setin $t put $put; with $t {put $t};`, OK, ["", ""]);
   test("", `def t [table]; register-builtins $t; with $t {put hello};`, OK, ["hello", ""]);
@@ -847,6 +841,16 @@ try {add 3 hello} {put $error}
   test("", `raise "hello"`, ERR, ["hello"]);
   test("", `proc a {raise "hello"}; a;`, ERR, ["hello"]);
   test("", `try {raise "hello"} {put $error};`, OK, ["hello", ""]);
+
+  test(
+    "",
+    `
+def l [list [proc {put [getin $argv 0]}]]
+[getin $l 0] "hello";
+    `,
+    OK,
+    ["hello", ""],
+  );
 
   console.log(test_failures ? test_failures + " FAILURES" : "ALL TESTS PASSED");
 
