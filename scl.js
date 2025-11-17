@@ -454,6 +454,7 @@ function register_all_builtins(X) {
     return is_falsy(result[1]) ? [ERR, msg] : [OK, U];
   });
 
+  rb(X, "raise", 1, ([msg]) => [ERR, to_string(msg)]);
   rb(X, "try", 2, ([code, catch2], X) => {
     let result;
     try {
@@ -843,6 +844,10 @@ try {add 3 hello} {put $error}
   test("", `def t [table]; setin $t put $put; with $t {put $t};`, OK, ["", ""]);
   test("", `def t [table]; register-builtins $t; with $t {put hello};`, OK, ["hello", ""]);
 
+  test("", `raise "hello"`, ERR, ["hello"]);
+  test("", `proc a {raise "hello"}; a;`, ERR, ["hello"]);
+  test("", `try {raise "hello"} {put $error};`, OK, ["hello", ""]);
+
   console.log(test_failures ? test_failures + " FAILURES" : "ALL TESTS PASSED");
 
   log = old_log;
@@ -863,6 +868,8 @@ tests();
  * - math functions?
  * - bitops?
  * - using \ at the end of a line to join lines
+ * - throw errors
+ * - calling proc values
  *
  * - clean up
  *   - common names and idents
