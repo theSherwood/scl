@@ -233,6 +233,7 @@ function interpret_value_list(X, src, i) {
     if (iter-- <= 0) return [i, [ERR, "max iterations exceeded in interpreter"]];
     let c = src[i];
     if (" \t\n".includes(c)) i++;
+    else if (c === "\\" && src[i + 1] === "\n") i += 2;
     else if (";]}".includes(c)) return [i, [ERR, "Unexpected " + c]];
     else {
       [i, [status, item]] = next_item(X, src, i);
@@ -253,11 +254,12 @@ function interpret_cmd(X, src, i, opt = 0) {
   while (true) {
     if (iter-- <= 0) return [i, [ERR, "max iterations exceeded in interpreter"]];
     let c = src[i];
-    if (i >= len || c === "\n" || c === ";") {
+    if (c === "\\" && src[i + 1] === "\n") i += 2;
+    else if (i >= len || c === "\n" || c === ";") {
       if (item !== U && cmd) args.push(item), (item = U);
       else if (item !== U && !cmd) (cmd = item), (item = U);
       if (cmd) {
-        last_value = run_cmd(X, cmd, args);
+        last_value = run_cmd(X, cmd, [...args]);
         if (last_value[0] !== OK) return [i, last_value];
       }
       (cmd = ""), (args.length = 0);
@@ -274,9 +276,9 @@ function interpret_cmd(X, src, i, opt = 0) {
       if (item !== U && cmd) args.push(item), (item = U);
       else if (item !== U && !cmd) (cmd = item), (item = U);
       if (cmd) {
-        last_value = run_cmd(X, cmd, args);
+        last_value = run_cmd(X, cmd, [...args]);
         if (last_value[0] !== OK) return [i, last_value];
-      } else last_value = [OK, NIL];
+      }
       return [i + 1, last_value];
     } else if (c === "#") {
       while (i < len && !"\n;".includes(src[i])) i++;
@@ -843,13 +845,36 @@ try {add 3 hello} {put $error}
   test("", `try {raise "hello"} {put $error};`, OK, ["hello", ""]);
 
   test(
-    "",
+    "call proc by value",
     `
 def l [list [proc {put [getin $argv 0]}]]
 [getin $l 0] "hello";
     `,
     OK,
     ["hello", ""],
+  );
+
+  test(
+    "escape newlines",
+    `
+id [list \\
+  1 \\
+  2 \\
+]
+    `,
+    OK,
+    ["[list 1 2]"],
+  );
+  test(
+    "escape newlines2",
+    `
+id [list \\
+  1 \\
+  2
+]
+    `,
+    OK,
+    ["[list 1 2]"],
   );
 
   console.log(test_failures ? test_failures + " FAILURES" : "ALL TESTS PASSED");
@@ -871,7 +896,6 @@ tests();
  * - bitops
  * - math functions?
  * - bitops?
- * - using \ at the end of a line to join lines
  *
  * - clean up
  *   - common names and idents
