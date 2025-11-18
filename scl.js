@@ -926,12 +926,10 @@ proc map {
 }
 
 def l [list 4 5 6]
-def l_ [map $l {* $it $it}]
-put $l_
+put [map $l {* $it $it}]
 
 def t [table f 4 g 5 h 6]
-def t_ [map $t {* $it $it}]
-put $t_
+put [map $t {* $it $it}]
 ;
     `,
     OK,
