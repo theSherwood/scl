@@ -31,7 +31,7 @@ The code is a bit denser than my usual habit (to try to stay compact) but I don'
 - comments
 - keyword args (`$argkv`)
 
-**`scl`** is not all that similar to `tcl`. 
+Note that the implementation doesn't horse around with modules or exporting anything. If you wish to play around with it, just copy the code to any JS repl.
 
 ## Examples
 
