@@ -139,11 +139,11 @@ function run_cmd(X, cmd, args) {
   else return [status, value ?? NIL];
 }
 
-function parse_string(src, i) {
+function parse_string(src, i, regex) {
   let c;
   let len = src.length;
   let char_arr = [];
-  while (i < len && !" \t\n;[]{}$\\".includes((c = src[i]))) {
+  while (i < len && regex.test((c = src[i]))) {
     if (c === "\\") {
       c = src[++i];
       if (i >= len) return [len, [ERR, "Unexpected end of source"]];
@@ -176,7 +176,7 @@ function to_string(it) {
 }
 
 function next_item(X, src, i) {
-  let item = (value = U);
+  let item, value;
   let status = 0;
   let str = "";
   let len = src.length;
@@ -200,26 +200,42 @@ function next_item(X, src, i) {
       }
       item = to_string(item) + src.slice(string_start, i++);
     } else if (c === "[") {
-      let res = interpret_cmd(X, src, i + 1, IS_SUBCOMMAND);
-      [i, [status, value]] = res;
-      if (status !== OK) return res;
+      [i, [status, value]] = interpret_cmd(X, src, i + 1, IS_SUBCOMMAND);
+      if (status !== OK) return [i, [status, value]];
       item === U ? (item = value) : (item = to_string(item) + to_string(value));
     } else if (c === '"') {
       char_arr = [];
       while ((c = src[++i]) !== '"') {
-        if (c === "\\") c = src[++i];
         if (i >= len) return [len, [ERR, "Unexpected end of source"]];
-        char_arr.push(c);
+        else if (c === "\\") {
+          c = src[++i];
+          if (i >= len) return [len, [ERR, "Unexpected end of source"]];
+          if (c === "n") char_arr.push("\n");
+          if (c === "t") char_arr.push("\t");
+          else char_arr.push(c);
+          continue;
+        } else if (c === "$") {
+          if (src[i + 1] === "[") {
+            [i, [status, value]] = interpret_cmd(X, src, i + 2, IS_SUBCOMMAND);
+            if (status !== OK) return [i, [status, value]];
+          } else {
+            [i, str] = parse_string(src, i + 1, /[0-9A-Za-z_]/);
+            [status, value] = get(X, str, STATIC_PARENT);
+            if (status !== OK) return [i, [status, value]];
+          }
+          i--, char_arr.push(to_string(value));
+          continue;
+        } else char_arr.push(c);
       }
       item = to_string(item) + char_arr.join("");
       i++;
     } else if (c === "$") {
-      [i, str] = parse_string(src, i + 1);
+      [i, str] = parse_string(src, i + 1, /[0-9A-Za-z_]/);
       [status, value] = get(X, str, STATIC_PARENT);
       if (status !== OK) return [i, [status, value]];
       item === U ? (item = value) : (item = to_string(item) + to_string(value));
     } else {
-      [i, str] = parse_string(src, i);
+      [i, str] = parse_string(src, i, /[^ \t\n;\[\]\{\}$\\]/);
       item === U ? (item = str) : (item = to_string(item) + str);
     }
   }
@@ -378,7 +394,7 @@ function register_all_builtins(X) {
     return [ERR, `cmd "${cmd}" expected a string or list or table`];
   });
 
-  rb(X, "append", -1, (args) => [OK, args?.join("")]);
+  rb(X, "str", -1, (args) => [OK, args?.join("")]);
   rb(X, "split", 3, ([sep, str]) => [OK, str.split(sep)]);
   rb(X, "at", 2, ([i, str]) => [OK, str[i]]);
   rb(X, "slice", 3, ([start, end, str], _X, cmd) => {
@@ -755,7 +771,7 @@ proc sum {
   def _result 0
   for {def $_index 0} {< [get $_index] $_limit} {set $_index [+ [get $_index] $_step_size]} {
     set _result [do $_body]
-    assert {is-num $_result} [append {Body should produce a number, not "} $_result {"}]
+    assert {is-num $_result} [str {Body should produce a number, not "} $_result {"}]
     set _sum [+ $_sum $_result]       
   }
 
@@ -782,14 +798,14 @@ put [sum i   1    [size $m] {
   test(
     "typed procs",
     `
-proc Int     {assert {is-int     [getin $argv 1]} [append {arg } [getin $argv 0] { should be an integer}]}
-proc Num     {assert {is-num     [getin $argv 1]} [append {arg } [getin $argv 0] { should be a number}]}
-proc Str     {assert {is-str     [getin $argv 1]} [append {arg } [getin $argv 0] { should be a string}]}
-proc List    {assert {is-list    [getin $argv 1]} [append {arg } [getin $argv 0] { should be a list}]}
-proc Table   {assert {is-table   [getin $argv 1]} [append {arg } [getin $argv 0] { should be a table}]}
-proc Proc    {assert {is-proc    [getin $argv 1]} [append {arg } [getin $argv 0] { should be a proc}]}
-proc Builtin {assert {is-builtin [getin $argv 1]} [append {arg } [getin $argv 0] { should be a builtin}]}
-proc Cmd     {assert {is-cmd     [getin $argv 1]} [append {arg } [getin $argv 0] { should be a cmd}]}
+proc Int     {assert {is-int     [getin $argv 1]} [str {arg } [getin $argv 0] { should be an integer}]}
+proc Num     {assert {is-num     [getin $argv 1]} [str {arg } [getin $argv 0] { should be a number}]}
+proc Str     {assert {is-str     [getin $argv 1]} [str {arg } [getin $argv 0] { should be a string}]}
+proc List    {assert {is-list    [getin $argv 1]} [str {arg } [getin $argv 0] { should be a list}]}
+proc Table   {assert {is-table   [getin $argv 1]} [str {arg } [getin $argv 0] { should be a table}]}
+proc Proc    {assert {is-proc    [getin $argv 1]} [str {arg } [getin $argv 0] { should be a proc}]}
+proc Builtin {assert {is-builtin [getin $argv 1]} [str {arg } [getin $argv 0] { should be a builtin}]}
+proc Cmd     {assert {is-cmd     [getin $argv 1]} [str {arg } [getin $argv 0] { should be a cmd}]}
 
 proc pr {
   assert {= [size $argv] 3} {Requires 3 arguments}
@@ -802,26 +818,26 @@ proc pr {
   assert {is-str $args} {Second argument must be a string}
   assert {is-str $body} {Third argument must be a string}
 
-  def list-args [to-list $args] 
+  def list_args [to-list $args] 
 
   def res {}
   def arg {}
   def typ {}
-  for {def i 0} {< [* $i 2] [size $list-args]} {set i [+ $i 1]} {
-    set typ [getin $list-args [* $i 2]]
-    set arg [getin $list-args [+ [* $i 2] 1]]
+  for {def i 0} {< [* $i 2] [size $list_args]} {set i [+ $i 1]} {
+    set typ [getin $list_args [* $i 2]]
+    set arg [getin $list_args [+ [* $i 2] 1]]
 
     assert {and [is-str $typ] [is-cmd [get! $typ]]} {Type argument must be the name of a cmd}
     assert {is-str $arg} {Argument name must be a string}
 
     # define the parameter name
-    set res [append $res {def } $arg { } {[getin $argv } $i {];}]
+    set res [str $res {def } $arg { } {[getin $argv } $i {];}]
     # add type assertion for parameter
-    set res [append $res $typ { } $arg { $} $arg {;}]
+    set res [str $res $typ { } $arg { $} $arg {;}]
   }
 
   # define the proc in the caller's environment
-  setin $dyn $name [proc [append $res { } $body]]
+  setin $dyn $name [proc [str $res { } $body]]
   ;
 }
 
@@ -877,6 +893,15 @@ id [list \\
     ["[list 1 2]"],
   );
 
+  test("", `def a 1; def b "0.$a.2"; get b`, OK, ["0.1.2"]);
+  test("", `def a 1; def b "0.$[get a].2"; get b`, OK, ["0.1.2"]);
+
+  test("newline", `id "hello\nworld"`, OK, ["hello\nworld"]);
+  test("tab", `id "hello\tworld"`, OK, ["hello\tworld"]);
+  test("", `id "hello{}world"`, OK, ["hello{}world"]);
+  test("", `id "hello\\" \\"world"`, OK, ['hello" "world']);
+  test("", `id "hello\\$world"`, OK, ["hello$world"]);
+
   console.log(test_failures ? test_failures + " FAILURES" : "ALL TESTS PASSED");
 
   log = old_log;
@@ -890,12 +915,9 @@ tests();
  * - some HOF
  *   - map
  *   - filter
- * - string interpolation
- *   - fix string handling while you're at it
  * - better printing/encoding
  * - bitops
  * - math functions?
- * - bitops?
  *
  * - clean up
  *   - common names and idents
