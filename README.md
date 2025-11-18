@@ -60,7 +60,7 @@ add 1 3   # 4
 
 ### keyword args
 
-Args beginning with `-` become keys in the `$argkv` table the `proc` receives. The argument following the key will be the corresponding value
+Args beginning with `-` become keys in the `$argkv` table the `proc` receives. The argument following the key will be the corresponding value in `$argv`.
 
 ```tcl
 proc get-foo {getin $argkv -foo}
