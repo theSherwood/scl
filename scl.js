@@ -796,14 +796,14 @@ put [sum i   1    [size $m] {
   test(
     "typed procs",
     `
-proc Int     {assert {is-int     [getin $argv 1]} [str {arg } [getin $argv 0] { should be an integer}]}
-proc Num     {assert {is-num     [getin $argv 1]} [str {arg } [getin $argv 0] { should be a number}]}
-proc Str     {assert {is-str     [getin $argv 1]} [str {arg } [getin $argv 0] { should be a string}]}
-proc List    {assert {is-list    [getin $argv 1]} [str {arg } [getin $argv 0] { should be a list}]}
-proc Table   {assert {is-table   [getin $argv 1]} [str {arg } [getin $argv 0] { should be a table}]}
-proc Proc    {assert {is-proc    [getin $argv 1]} [str {arg } [getin $argv 0] { should be a proc}]}
-proc Builtin {assert {is-builtin [getin $argv 1]} [str {arg } [getin $argv 0] { should be a builtin}]}
-proc Cmd     {assert {is-cmd     [getin $argv 1]} [str {arg } [getin $argv 0] { should be a cmd}]}
+proc Int     {assert {is-int     [getin $argv 1]} "arg $[getin $argv 0] should be an integer"}
+proc Num     {assert {is-num     [getin $argv 1]} "arg $[getin $argv 0] should be a number"}
+proc Str     {assert {is-str     [getin $argv 1]} "arg $[getin $argv 0] should be a string"}
+proc List    {assert {is-list    [getin $argv 1]} "arg $[getin $argv 0] should be a list"}
+proc Table   {assert {is-table   [getin $argv 1]} "arg $[getin $argv 0] should be a table"}
+proc Proc    {assert {is-proc    [getin $argv 1]} "arg $[getin $argv 0] should be a proc"}
+proc Builtin {assert {is-builtin [getin $argv 1]} "arg $[getin $argv 0] should be a builtin"}
+proc Cmd     {assert {is-cmd     [getin $argv 1]} "arg $[getin $argv 0] should be a cmd"}
 
 proc pr {
   assert {= [size $argv] 3} {Requires 3 arguments}
