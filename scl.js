@@ -691,6 +691,10 @@ function tests() {
   test("", `while {id 1} {break 1}`, OK, [""]);
   test("", `while {id 1} {put 3; while {id 1} {put 4; break 2}; put 5}`, OK, ["3", "4", ""]);
 
+  test("", `def a 0; while {< $a 3} {incr a; put 3; continue; put 4};`, OK, ["3", "3", "3", ""]);
+  test("", `def a 0; while {< $a 3} {incr a; put 3; continue 1; put 4};`, OK, ["3", "3", "3", ""]);
+  test("", `def a 0; while {< $a 3} {incr a; put 3; while {id 1} {continue 2}; put 4};`, OK, ["3", "3", "3", ""]);
+
   test("", `proc add {+ [getin $argv 0] [getin $argv 1]}; add 1 2`, OK, ["3"]);
 
   test("", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 1} {put 3} else {put 4}]; get a`, OK, ["3", "3"]);
