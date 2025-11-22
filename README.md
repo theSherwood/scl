@@ -78,17 +78,16 @@ proc sum {
   def _limit     [getin $argv 2]
   def _body      [getin $argv 3]
 
-  assert {is-str $_index}
-  assert {is-num $_step_size}
-  assert {is-num $_limit}
-  assert {is-str $_body}
+  assert {str? $_index}
+  assert {num? $_step_size}
+  assert {num? $_limit}
+  assert {str? $_body}
 
   def _sum 0
-
   def _result 0
   for {def $_index 0} {< [get $_index] $_limit} {set $_index [+ [get $_index] $_step_size]} {
     set _result [do $_body]
-    assert {is-num $_result} [str {Body should produce a number, not "} $_result {"}]
+    assert {num? $_result} [str {Body should produce a number, not "} $_result {"}]
     set _sum [+ $_sum $_result]       
   }
 
@@ -127,14 +126,14 @@ pr add {Num a Num b} {+ $a $b}
 Here's the definition of the helper:
 
 ```tcl
-proc Int     {assert {is-int     [getin $argv 1]} "arg $[getin $argv 0] should be an integer"}
-proc Num     {assert {is-num     [getin $argv 1]} "arg $[getin $argv 0] should be a number"}
-proc Str     {assert {is-str     [getin $argv 1]} "arg $[getin $argv 0] should be a string"}
-proc List    {assert {is-list    [getin $argv 1]} "arg $[getin $argv 0] should be a list"}
-proc Table   {assert {is-table   [getin $argv 1]} "arg $[getin $argv 0] should be a table"}
-proc Proc    {assert {is-proc    [getin $argv 1]} "arg $[getin $argv 0] should be a proc"}
-proc Builtin {assert {is-builtin [getin $argv 1]} "arg $[getin $argv 0] should be a builtin"}
-proc Cmd     {assert {is-cmd     [getin $argv 1]} "arg $[getin $argv 0] should be a cmd"}
+proc Int     {assert {int?     [getin $argv 1]} "arg $[getin $argv 0] should be an integer"}
+proc Num     {assert {num?     [getin $argv 1]} "arg $[getin $argv 0] should be a number"}
+proc Str     {assert {str?     [getin $argv 1]} "arg $[getin $argv 0] should be a string"}
+proc List    {assert {list?    [getin $argv 1]} "arg $[getin $argv 0] should be a list"}
+proc Table   {assert {table?   [getin $argv 1]} "arg $[getin $argv 0] should be a table"}
+proc Proc    {assert {proc?    [getin $argv 1]} "arg $[getin $argv 0] should be a proc"}
+proc Builtin {assert {builtin? [getin $argv 1]} "arg $[getin $argv 0] should be a builtin"}
+proc Cmd     {assert {cmd?     [getin $argv 1]} "arg $[getin $argv 0] should be a cmd"}
 
 proc pr {
   assert {= [size $argv] 3} {Requires 3 arguments}
@@ -143,9 +142,9 @@ proc pr {
   def args [getin $argv 1]
   def body [getin $argv 2]
 
-  assert {is-str $name} {First argument must be a string}
-  assert {is-str $args} {Second argument must be a string}
-  assert {is-str $body} {Third argument must be a string}
+  assert {str? $name} {First argument must be a string}
+  assert {str? $args} {Second argument must be a string}
+  assert {str? $body} {Third argument must be a string}
 
   def list_args [to-list $args] 
 
@@ -156,8 +155,8 @@ proc pr {
     set typ [getin $list_args [* $i 2]]
     set arg [getin $list_args [+ [* $i 2] 1]]
 
-    assert {and [is-str $typ] [is-cmd [get! $typ]]} {Type argument must be the name of a cmd}
-    assert {is-str $arg} {Argument name must be a string}
+    assert {and [str? $typ] [cmd? [get! $typ]]} {Type argument must be the name of a cmd}
+    assert {str? $arg} {Argument name must be a string}
 
     # define the parameter name
     set res [str $res {def } $arg { } {[getin $argv } $i {];}]
@@ -205,15 +204,15 @@ proc map {
   assert {= 2 [size $argv]} {map expects 2 args}
   def coll [getin $argv 0]
   def code [getin $argv 1]
-  assert {is-str $code} {map expects the second arg to be a string}
+  assert {str? $code} {map expects the second arg to be a string}
 
-  if {is-list $coll} {
+  if {list? $coll} {
     def result [list]
     each $coll {push $result [do $code]}
     return $result
   }
 
-  if {is-table $coll} {
+  if {table? $coll} {
     def result [table]
     each $coll {setin $result $key [do $code]}
     return $result

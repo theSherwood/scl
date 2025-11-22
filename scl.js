@@ -360,14 +360,14 @@ function register_all_builtins(X) {
   rb(X, "and", [1, 1000], (args) => [OK, args.every((arg) => !is_falsy(arg)) ? "1" : "0"]);
   rb(X, "not", 1, ([arg]) => [OK, is_falsy(arg) ? "1" : "0"]);
 
-  rb(X, "is-num", 1, ([value]) => [OK, is_num(value) ? "1" : "0"]);
-  rb(X, "is-int", 1, ([value]) => [OK, is_int(value) ? "1" : "0"]);
-  rb(X, "is-str", 1, ([value]) => [OK, is_str(value) ? "1" : "0"]);
-  rb(X, "is-proc", 1, ([value]) => [OK, is_proc(value) ? "1" : "0"]);
-  rb(X, "is-list", 1, ([value]) => [OK, is_list(value) ? "1" : "0"]);
-  rb(X, "is-table", 1, ([value]) => [OK, is_table(value) ? "1" : "0"]);
-  rb(X, "is-builtin", 1, ([value]) => [OK, is_builtin(value) ? "1" : "0"]);
-  rb(X, "is-cmd", 1, ([value]) => [OK, is_cmd(value) ? "1" : "0"]);
+  rb(X, "num?", 1, ([value]) => [OK, is_num(value) ? "1" : "0"]);
+  rb(X, "int?", 1, ([value]) => [OK, is_int(value) ? "1" : "0"]);
+  rb(X, "str?", 1, ([value]) => [OK, is_str(value) ? "1" : "0"]);
+  rb(X, "proc?", 1, ([value]) => [OK, is_proc(value) ? "1" : "0"]);
+  rb(X, "list?", 1, ([value]) => [OK, is_list(value) ? "1" : "0"]);
+  rb(X, "table?", 1, ([value]) => [OK, is_table(value) ? "1" : "0"]);
+  rb(X, "builtin?", 1, ([value]) => [OK, is_builtin(value) ? "1" : "0"]);
+  rb(X, "cmd?", 1, ([value]) => [OK, is_cmd(value) ? "1" : "0"]);
 
   rb(X, "size", 1, ([value], X, cmd) => {
     if (is_str(value) || is_list(value)) return [OK, value.length + ""];
@@ -594,11 +594,11 @@ function tests() {
 
   test("", "set a 13; put $a", OK, ["13", "13"]);
   test("", "set a 13; put $a;", OK, ["13", ""]);
-  test("", "set a 13; unset a; put $a;", OK, ["", ""]);
+  test("set/unset 1", "set a 13; put $a; unset a; put $a;", OK, ["13", "", ""]);
 
   test("", "set a 13; put [get a]", OK, ["13", "13"]);
   test("", "set a 13; put [get a];", OK, ["13", ""]);
-  test("", "set a 13; unset a; put [get a];", OK, ["", ""]);
+  test("set/unset 2", "set a 13; put $a; unset a; put [get a];", OK, ["13", "", ""]);
 
   test("", "set a b; set b 18; get [get a]", OK, ["18"]);
   test("", "set a b; set b 18; get $a", OK, ["18"]);
@@ -613,16 +613,18 @@ function tests() {
   test("", "% 11 16", OK, ["11"]);
   test("", "** 2 3", OK, ["8"]);
 
-  test("", "def a 0; incr a; get a", OK, ["1"]);
-  test("", "def a 0; decr a; get a", OK, ["-1"]);
+  test("incr", "def a 0; incr a; get a", OK, ["1"]);
+  test("decr", "def a 0; decr a; get a", OK, ["-1"]);
 
   test("", "set a {1 2 3}", OK, ["1 2 3"]);
   test("", "proc a {1 2 3}", OK, ["[proc a {1 2 3}]"]);
   test("", "proc a {1 2 3}; a", ERR, ['cmd "1" not found']);
   test("", "proc a {get a}; a", OK, ["[proc a {get a}]"]);
 
-  let quine_src = `proc q {str [slice [str $q] 1 -1] "; q" }; q`;
-  test("quine", quine_src, OK, [quine_src]);
+  let quine_src_1 = `proc q {str [slice [str $q] 1 -1] "; put [q];" }; put [q];`;
+  test("quine 1", quine_src_1, OK, [quine_src_1, ""]);
+  let quine_src_2 = `def q {id "def q {$q}; do \\$q"}; do $q`;
+  test("quine 2", quine_src_2, OK, [quine_src_2]);
 
   test("args 1", "proc a {size $argv}; a one two three", OK, ["3"]);
   test("args 2", "proc a {size $argv;}; a one two three", OK, [""]);
@@ -707,7 +709,7 @@ each $a {put $it $i}
     "",
   ]);
 
-  test("", `proc add {+ [getin $argv 0] [getin $argv 1]}; add 1 2`, OK, ["3"]);
+  test("getin", `proc add {+ [getin $argv 0] [getin $argv 1]}; add 1 2`, OK, ["3"]);
 
   test("if 1", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 1} {put 3} else {put 4}]; get a`, OK, [
     "3",
@@ -743,6 +745,8 @@ set a {foo#bar}   # or here
   test("apply 1", `def a [list b 1 c 2]; apply $table $a`, OK, ["[table b 1 c 2]"]);
   test("apply 2", `def a [list b 1 c 2]; apply table $a`, OK, ["[table b 1 c 2]"]);
 
+  test("proc src", `proc a {put 3}; proc b [src $a]; b;`, OK, ["3", ""]);
+
   test(
     "closure 1",
     `
@@ -777,17 +781,16 @@ proc sum {
   def _limit     [getin $argv 2]
   def _body      [getin $argv 3]
 
-  assert {is-str $_index}
-  assert {is-num $_step_size}
-  assert {is-num $_limit}
-  assert {is-str $_body}
+  assert {str? $_index}
+  assert {num? $_step_size}
+  assert {num? $_limit}
+  assert {str? $_body}
 
   def _sum 0
-
   def _result 0
   for {def $_index 0} {< [get $_index] $_limit} {set $_index [+ [get $_index] $_step_size]} {
     set _result [do $_body]
-    assert {is-num $_result} [str {Body should produce a number, not "} $_result {"}]
+    assert {num? $_result} [str {Body should produce a number, not "} $_result {"}]
     set _sum [+ $_sum $_result]       
   }
 
@@ -814,14 +817,14 @@ put [sum i   1    [size $m] {
   test(
     "typed procs",
     `
-proc Int     {assert {is-int     [getin $argv 1]} "arg $[getin $argv 0] should be an integer"}
-proc Num     {assert {is-num     [getin $argv 1]} "arg $[getin $argv 0] should be a number"}
-proc Str     {assert {is-str     [getin $argv 1]} "arg $[getin $argv 0] should be a string"}
-proc List    {assert {is-list    [getin $argv 1]} "arg $[getin $argv 0] should be a list"}
-proc Table   {assert {is-table   [getin $argv 1]} "arg $[getin $argv 0] should be a table"}
-proc Proc    {assert {is-proc    [getin $argv 1]} "arg $[getin $argv 0] should be a proc"}
-proc Builtin {assert {is-builtin [getin $argv 1]} "arg $[getin $argv 0] should be a builtin"}
-proc Cmd     {assert {is-cmd     [getin $argv 1]} "arg $[getin $argv 0] should be a cmd"}
+proc Int     {assert {int?     [getin $argv 1]} "arg $[getin $argv 0] should be an integer"}
+proc Num     {assert {num?     [getin $argv 1]} "arg $[getin $argv 0] should be a number"}
+proc Str     {assert {str?     [getin $argv 1]} "arg $[getin $argv 0] should be a string"}
+proc List    {assert {list?    [getin $argv 1]} "arg $[getin $argv 0] should be a list"}
+proc Table   {assert {table?   [getin $argv 1]} "arg $[getin $argv 0] should be a table"}
+proc Proc    {assert {proc?    [getin $argv 1]} "arg $[getin $argv 0] should be a proc"}
+proc Builtin {assert {builtin? [getin $argv 1]} "arg $[getin $argv 0] should be a builtin"}
+proc Cmd     {assert {cmd?     [getin $argv 1]} "arg $[getin $argv 0] should be a cmd"}
 
 proc pr {
   assert {= [size $argv] 3} {Requires 3 arguments}
@@ -830,9 +833,9 @@ proc pr {
   def args [getin $argv 1]
   def body [getin $argv 2]
 
-  assert {is-str $name} {First argument must be a string}
-  assert {is-str $args} {Second argument must be a string}
-  assert {is-str $body} {Third argument must be a string}
+  assert {str? $name} {First argument must be a string}
+  assert {str? $args} {Second argument must be a string}
+  assert {str? $body} {Third argument must be a string}
 
   def list_args [to-list $args] 
 
@@ -843,8 +846,8 @@ proc pr {
     set typ [getin $list_args [* $i 2]]
     set arg [getin $list_args [+ [* $i 2] 1]]
 
-    assert {and [is-str $typ] [is-cmd [get! $typ]]} {Type argument must be the name of a cmd}
-    assert {is-str $arg} {Argument name must be a string}
+    assert {and [str? $typ] [cmd? [get! $typ]]} {Type argument must be the name of a cmd}
+    assert {str? $arg} {Argument name must be a string}
 
     # define the parameter name
     set res [str $res {def } $arg { } {[getin $argv } $i {];}]
@@ -931,15 +934,15 @@ proc map {
   assert {= 2 [size $argv]} {map expects 2 args}
   def coll [getin $argv 0]
   def code [getin $argv 1]
-  assert {is-str $code} {map expects the second arg to be a string}
+  assert {str? $code} {map expects the second arg to be a string}
 
-  if {is-list $coll} {
+  if {list? $coll} {
     def result [list]
     each $coll {push $result [do $code]}
     return $result
   }
 
-  if {is-table $coll} {
+  if {table? $coll} {
     def result [table]
     each $coll {setin $result $key [do $code]}
     return $result
@@ -966,15 +969,15 @@ proc filter {
   assert {= 2 [size $argv]} {filter expects 2 args}
   def coll [getin $argv 0]
   def code [getin $argv 1]
-  assert {is-str $code} {filter expects the second arg to be a string}
+  assert {str? $code} {filter expects the second arg to be a string}
 
-  if {is-list $coll} {
+  if {list? $coll} {
     def result [list]
     each $coll {def __res [do $code]; if {get __res} {push $result $it}}
     return $result
   }
 
-  if {is-table $coll} {
+  if {table? $coll} {
     def result [table]
     each $coll {def __res [do $code]; if {get __res} {setin $result $key $it}}
     return $result
