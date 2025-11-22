@@ -241,11 +241,11 @@ function interpret_value_list(X, src, i, values = [], iter = 10_000) {
       if (item !== U) values.push(item);
     }
   }
-  return values;
+  return [i, [OK, values]];
 }
 
 function interpret_cmd(X, src, i, opt = 0, iter = 10_000) {
-  let c, cmd, item;
+  let c, cmd, item, status;
   let args = [];
   let last_value = [OK, NIL];
   while (true) {
@@ -315,6 +315,7 @@ function register_all_builtins(X) {
     return [OK, proc];
   });
   rb(X, "apply", 2, ([proc, list], X) => run_cmd(X, proc, list));
+  rb(X, "src", 1, ([proc], X, cmd) => (is_proc(proc) ? [OK, proc.code] : [ERR, `cmd "${cmd}" expected a proc`]));
 
   rb(X, "id", 1, ([name]) => [OK, name]);
   rb(X, "put", -1, (args) => (put_log(args.map((arg) => to_str(arg)).join(" ")), [OK, args[0]]));
@@ -374,10 +375,10 @@ function register_all_builtins(X) {
     return [ERR, `cmd "${cmd}" expected a string or list or table`];
   });
 
-  rb(X, "str", -1, (args) => [OK, args?.join("")]);
+  rb(X, "str", -1, (args) => [OK, args?.map(to_str)?.join("") ?? ""]);
   rb(X, "split", 3, ([sep, str]) => [OK, str.split(sep)]);
   rb(X, "at", 2, ([i, str]) => [OK, str[i]]);
-  rb(X, "slice", 3, ([start, end, str], _X, cmd) => {
+  rb(X, "slice", 3, ([str, start, end], _X, cmd) => {
     if (!(N.isFinite(N(start)) && N.isFinite(N(end)))) return [ERR, `cmd "${cmd}" expected valid numbers`];
     return [OK, str.slice(start, end)];
   });
@@ -401,7 +402,7 @@ function register_all_builtins(X) {
   rb(X, "list", -1, (args) => [OK, args]);
   let cmd_to_list = ([code], X, cmd) => {
     if (!is_str(code)) return [ERR, `cmd "${cmd}" expected a string`];
-    let values = interpret_value_list(X, code, 0);
+    let [i, [status, values]] = interpret_value_list(X, code, 0);
     if (status !== OK) return [ERR, values];
     if (!is_list(values)) return [ERR, `Failed to build list`];
     return [OK, values];
@@ -537,7 +538,7 @@ function register_all_builtins(X) {
   });
 }
 
-function eval(src) {
+function scl_eval(src) {
   let X = new Map();
   register_all_builtins(X);
   X.set(GLOBAL, X);
@@ -555,9 +556,12 @@ function eval(src) {
 let test_failures = 0;
 let print_buffer = [];
 
+let examples = [];
+
 function test(name, src, code, values) {
+  if (name) examples.push({ name, src });
   print_buffer.length = 0;
-  let [result_code, result_value] = eval(src);
+  let [result_code, result_value] = scl_eval(src);
   let all_equal = values.length === print_buffer.length + 1;
   for (let i = 0; i < print_buffer.length; i++) {
     if (all_equal === false) break;
@@ -583,7 +587,7 @@ function tests() {
   console.log("Start Tests");
 
   test("", "put hello world", OK, ["hello world", "hello"]);
-  test("", "put hello world;", OK, ["hello world", ""]);
+  test("hello world", "put hello world;", OK, ["hello world", ""]);
 
   test("", "def a 13; put $a;", OK, ["13", ""]);
   test("", "def a 13; unset a; put $a;", OK, ["", ""]);
@@ -617,20 +621,23 @@ function tests() {
   test("", "proc a {1 2 3}; a", ERR, ['cmd "1" not found']);
   test("", "proc a {get a}; a", OK, ["[proc a {get a}]"]);
 
-  test("", "proc a {size $argv}; a one two three", OK, ["3"]);
-  test("", "proc a {size $argv;}; a one two three", OK, [""]);
-  test("", "proc a {size $argkv}; a one two three", OK, ["0"]);
-  test("", "proc a {size $argkv}; a one two -foo three -bar four", OK, ["2"]);
-  test("", "proc a {getin $argv 1}; a one two three", OK, ["two"]);
-  test("", "proc a {getin $argkv -foo}; a one two -foo three -bar four", OK, ["three"]);
-  test("", "proc a {getin $argkv -foo bar}; a one two -foo [table bar 4]", OK, ["4"]);
+  let quine_src = `proc q {str [slice [str $q] 1 -1] "; q" }; q`;
+  test("quine", quine_src, OK, [quine_src]);
 
-  test("", "assert {= 1 1}", OK, [""]);
-  test("", "assert {= 1 2}", ERR, ["FAILED ASSERT: { = 1 2 }"]);
-  test("", "assert {= 1 2} {Not Equal}", ERR, ["Not Equal"]);
+  test("args 1", "proc a {size $argv}; a one two three", OK, ["3"]);
+  test("args 2", "proc a {size $argv;}; a one two three", OK, [""]);
+  test("args 3", "proc a {size $argkv}; a one two three", OK, ["0"]);
+  test("args 4", "proc a {size $argkv}; a one two -foo three -bar four", OK, ["2"]);
+  test("args 5", "proc a {getin $argv 1}; a one two three", OK, ["two"]);
+  test("args 6", "proc a {getin $argkv -foo}; a one two -foo three -bar four", OK, ["three"]);
+  test("args 7", "proc a {getin $argkv -foo bar}; a one two -foo [table bar 4]", OK, ["4"]);
 
-  test("", "try {assert {= 1 1}} {id $error}", OK, [""]);
-  test("", "try {assert {= 1 2}} {id $error}", OK, ["FAILED ASSERT: { = 1 2 }"]);
+  test("assert 1", "assert {= 1 1}", OK, [""]);
+  test("assert 2", "assert {= 1 2}", ERR, ["FAILED ASSERT: { = 1 2 }"]);
+  test("assert 3", "assert {= 1 2} {Not Equal}", ERR, ["Not Equal"]);
+
+  test("try 1", "try {assert {= 1 1}} {id $error}", OK, [""]);
+  test("try 2", "try {assert {= 1 2}} {id $error}", OK, ["FAILED ASSERT: { = 1 2 }"]);
 
   test("", "def a foo; def b.$a bar; get b.foo", OK, ["bar"]);
   test("", "def a foo; def b.foo bar; get b.$a", OK, ["bar"]);
@@ -641,34 +648,34 @@ function tests() {
 
   test("", `proc a {set b "foo bar"; get b}; a`, OK, ["foo bar"]);
 
-  test("", `def a [table]; size $a`, OK, ["0"]);
-  test("", `def a [table a b c d]; getin $a a`, OK, ["b"]);
-  test("", `def a [table a b c d]; getin $a b`, OK, [""]);
-  test("", `def a [table a b c d]; getin $a c`, OK, ["d"]);
-  test("", `def a [table a b c d]; getin $a e f g`, OK, [""]);
-  test("", `def a [table a b c d]; get a`, OK, ["[table a b c d]"]);
-  test("", `def a [table a b]; def b $a; get b`, OK, ["[table a b]"]);
-  test("", `def a [table a b c d]; size $a`, OK, ["2"]);
-  test("", `def a [table b [table c [table d 3]]]; getin $a b c d`, OK, ["3"]);
+  test("table 1", `def a [table]; size $a`, OK, ["0"]);
+  test("table 2", `def a [table a b c d]; getin $a a`, OK, ["b"]);
+  test("table 3", `def a [table a b c d]; getin $a b`, OK, [""]);
+  test("table 4", `def a [table a b c d]; getin $a c`, OK, ["d"]);
+  test("table 5", `def a [table a b c d]; getin $a e f g`, OK, [""]);
+  test("table 6", `def a [table a b c d]; get a`, OK, ["[table a b c d]"]);
+  test("table 7", `def a [table a b]; def b $a; get b`, OK, ["[table a b]"]);
+  test("table 8", `def a [table a b c d]; size $a`, OK, ["2"]);
+  test("table 9", `def a [table b [table c [table d 3]]]; getin $a b c d`, OK, ["3"]);
 
-  test("", `def a [list]; size $a`, OK, ["0"]);
-  test("", `def a [list a b c d]; size $a`, OK, ["4"]);
-  test("", `def a [list a b c d]; getin $a 0`, OK, ["a"]);
-  test("", `def a [list a b c d]; getin $a 3`, OK, ["d"]);
-  test("", `def a [list a [list 5 6 7] c d]; getin $a 1 2`, OK, ["7"]);
+  test("list 1", `def a [list]; size $a`, OK, ["0"]);
+  test("list 2", `def a [list a b c d]; size $a`, OK, ["4"]);
+  test("list 3", `def a [list a b c d]; getin $a 0`, OK, ["a"]);
+  test("list 4", `def a [list a b c d]; getin $a 3`, OK, ["d"]);
+  test("list 5", `def a [list a [list 5 6 7] c d]; getin $a 1 2`, OK, ["7"]);
 
   test("", `to-list {1 2 3}`, OK, ["[list 1 2 3]"]);
   test("", `to-table {a b c d}`, OK, ["[table a b c d]"]);
   test("", `to-table {a [ table ] c [list]}`, OK, ["[table a [table] c [list]]"]);
 
-  test("", `def a 4; proc b [join " " [concat [list get] [list a]]]; b`, OK, ["4"]);
+  test("join", `def a 4; proc b [join " " [concat [list get] [list a]]]; b`, OK, ["4"]);
 
   test(
     "each table",
     `
-    def a [table a 1 b 2]
-    each $a {put $key $it $i}
-    `,
+def a [table a 1 b 2]
+each $a {put $key $it $i}
+`,
     OK,
     ["a 1 0", "b 2 1", ""],
   );
@@ -676,57 +683,68 @@ function tests() {
   test(
     "each list",
     `
-    def a [list 4 5 6]
-    each $a {put $it $i}
-    `,
+def a [list 4 5 6]
+each $a {put $it $i}
+`,
     OK,
     ["4 0", "5 1", "6 2", ""],
   );
 
-  test("", `def a 0; while {< $a 5} {put $a; set a [+ $a 1];}`, OK, ["0", "1", "2", "3", "4", ""]);
+  test("while loop", `def a 0; while {< $a 5} {put $a; set a [+ $a 1];}`, OK, ["0", "1", "2", "3", "4", ""]);
 
-  test("", `proc a {return 1; return 2}; a`, OK, ["1"]);
+  test("return", `proc a {return 1; return 2}; a`, OK, ["1"]);
 
-  test("", `while {< 1 2} {put 3; break}`, OK, ["3", ""]);
-  test("", `while {id 1} {break 1}`, OK, [""]);
-  test("", `while {id 1} {put 3; while {id 1} {put 4; break 2}; put 5}`, OK, ["3", "4", ""]);
+  test("break 1", `while {< 1 2} {put 3; break}`, OK, ["3", ""]);
+  test("break 2", `while {id 1} {break 1}`, OK, [""]);
+  test("break 3", `while {id 1} {put 3; while {id 1} {put 4; break 2}; put 5}`, OK, ["3", "4", ""]);
 
-  test("", `def a 0; while {< $a 3} {incr a; put 3; continue; put 4};`, OK, ["3", "3", "3", ""]);
-  test("", `def a 0; while {< $a 3} {incr a; put 3; continue 1; put 4};`, OK, ["3", "3", "3", ""]);
-  test("", `def a 0; while {< $a 3} {incr a; put 3; while {id 1} {continue 2}; put 4};`, OK, ["3", "3", "3", ""]);
+  test("continue 1", `def a 0; while {< $a 3} {incr a; put 3; continue; put 4};`, OK, ["3", "3", "3", ""]);
+  test("continue 2", `def a 0; while {< $a 3} {incr a; put 3; continue 1; put 4};`, OK, ["3", "3", "3", ""]);
+  test("continue 3", `def a 0; while {< $a 3} {incr a; put 3; while {id 1} {continue 2}; put 4};`, OK, [
+    "3",
+    "3",
+    "3",
+    "",
+  ]);
 
   test("", `proc add {+ [getin $argv 0] [getin $argv 1]}; add 1 2`, OK, ["3"]);
 
-  test("", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 1} {put 3} else {put 4}]; get a`, OK, ["3", "3"]);
-  test("", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 0} {put 3} else {put 4}]; get a`, OK, ["4", "4"]);
+  test("if 1", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 1} {put 3} else {put 4}]; get a`, OK, [
+    "3",
+    "3",
+  ]);
+  test("if 2", `def a [if {id 0} {put 1} elif {id ""} {put 2} elif {id 0} {put 3} else {put 4}]; get a`, OK, [
+    "4",
+    "4",
+  ]);
 
   test("", `def a 1 # anything can go here`, OK, ["1"]);
   test(
     "comments",
     `
-    def a 1           # anything can go here
-    set a {foo#bar}   # or here
-    `,
+def a 1           # anything can go here
+set a {foo#bar}   # or here
+`,
     OK,
     ["foo#bar"],
   );
 
-  test("stack overflow", `proc a {a}; a`, PANIC, ["PANIC: Maximum call stack size exceeded"]);
-  test("stack overflow", `try {proc a {a}; a} {put $error;}`, OK, ["Maximum call stack size exceeded", ""]);
+  test("stack overflow 1", `proc a {a}; a`, PANIC, ["PANIC: Maximum call stack size exceeded"]);
+  test("stack overflow 2", `try {proc a {a}; a} {put $error;}`, OK, ["Maximum call stack size exceeded", ""]);
 
   test("", `def a 2; proc b {return $a}; b`, OK, ["2"]);
   test("", `def a 2; proc b {return [get a]}; b`, OK, ["2"]);
 
-  test("", `for {def i 0} {< $i 5} {set i [+ $i 1]} {put $i;}`, OK, ["0", "1", "2", "3", "4", ""]);
+  test("for loop", `for {def i 0} {< $i 5} {set i [+ $i 1]} {put $i;}`, OK, ["0", "1", "2", "3", "4", ""]);
 
-  test("", `proc ++ {set [getin $argv 0] [+ [get [getin $argv 0]] 1]}; def a 0; ++ a`, OK, ["1"]);
-  test("", `proc -- {set [getin $argv 0] [- [get [getin $argv 0]] 1]}; def a 0; -- a`, OK, ["-1"]);
+  test("++", `proc ++ {set [getin $argv 0] [+ [get [getin $argv 0]] 1]}; def a 0; ++ a`, OK, ["1"]);
+  test("--", `proc -- {set [getin $argv 0] [- [get [getin $argv 0]] 1]}; def a 0; -- a`, OK, ["-1"]);
 
-  test("", `def a [list b 1 c 2]; apply $table $a`, OK, ["[table b 1 c 2]"]);
-  test("", `def a [list b 1 c 2]; apply table $a`, OK, ["[table b 1 c 2]"]);
+  test("apply 1", `def a [list b 1 c 2]; apply $table $a`, OK, ["[table b 1 c 2]"]);
+  test("apply 2", `def a [list b 1 c 2]; apply table $a`, OK, ["[table b 1 c 2]"]);
 
   test(
-    "closure",
+    "closure 1",
     `
 def a 1
 proc b {
@@ -740,13 +758,13 @@ id $a
     OK,
     ["2", "1"],
   );
-  test("", `proc a {def a 3; proc b {proc c {return $a}}}; def b [a]; def c [b]; c`, OK, ["3"]);
-  test("", `proc a {proc b {def a 3; proc c {return $a}}}; def b [a]; def c [b]; c`, OK, ["3"]);
+  test("closure 2", `proc a {def a 3; proc b {proc c {return $a}}}; def b [a]; def c [b]; c`, OK, ["3"]);
+  test("closure 3", `proc a {proc b {def a 3; proc c {return $a}}}; def b [a]; def c [b]; c`, OK, ["3"]);
 
-  test("", `def a [proc {put hello}]; get a`, OK, ["[proc {put hello}]"]);
+  test("proc as value", `def a [proc {put hello}]; get a`, OK, ["[proc {put hello}]"]);
 
-  test("", `do {def a 3}; get a`, OK, ["3"]);
-  test("", `def a {break}; while {id 1} {put 1; do $a}`, OK, ["1", ""]);
+  test("do 1", `do {def a 3}; get a`, OK, ["3"]);
+  test("do 2", `def a {break}; while {id 1} {put 1; do $a}`, OK, ["1", ""]);
 
   test(
     "jensen's device",
@@ -839,6 +857,7 @@ proc pr {
   ;
 }
 
+# define proc using the "pr" helper
 pr add {Num a Num b} {+ $a $b}
 
 put [add 1 2]
@@ -849,27 +868,27 @@ try {add 3 hello} {put $error}
     ["3", "arg b should be a number", ""],
   );
 
-  test("", `def t [table]; with $t {put hello};`, ERR, ['cmd "put" not found']);
-  test("", `def t [table]; setin $t put $put; with $t {put hello};`, OK, ["hello", ""]);
-  test("", `def t [table]; setin $t put $put; with $t {put $t};`, OK, ["", ""]);
-  test("", `def t [table]; register-builtins $t; with $t {put hello};`, OK, ["hello", ""]);
+  test("with 1", `def t [table]; with $t {put hello};`, ERR, ['cmd "put" not found']);
+  test("with 2", `def t [table]; setin $t put $put; with $t {put hello};`, OK, ["hello", ""]);
+  test("with 3", `def t [table]; setin $t put $put; with $t {put $t};`, OK, ["", ""]);
+  test("with 4", `def t [table]; register-builtins $t; with $t {put hello};`, OK, ["hello", ""]);
 
-  test("", `raise "hello"`, ERR, ["hello"]);
-  test("", `proc a {raise "hello"}; a;`, ERR, ["hello"]);
-  test("", `try {raise "hello"} {put $error};`, OK, ["hello", ""]);
+  test("raise 1", `raise "hello"`, ERR, ["hello"]);
+  test("raise 2", `proc a {raise "hello"}; a;`, ERR, ["hello"]);
+  test("raise 3", `try {raise "hello"} {put $error};`, OK, ["hello", ""]);
 
   test(
     "call proc by value",
     `
 def l [list [proc {put [getin $argv 0]}]]
 [getin $l 0] "hello";
-    `,
+`,
     OK,
     ["hello", ""],
   );
 
   test(
-    "escape newlines",
+    "escape newlines 1",
     `
 id [list \\
   1 \\
@@ -880,7 +899,7 @@ id [list \\
     ["[list 1 2]"],
   );
   test(
-    "escape newlines2",
+    "escape newlines 2",
     `
 id [list \\
   1 \\
@@ -894,14 +913,14 @@ id [list \\
   test("", `def a 1; def b "0.$a.2"; get b`, OK, ["0.1.2"]);
   test("", `def a 1; def b "0.$[get a].2"; get b`, OK, ["0.1.2"]);
 
-  test("newline", `id "hello\nworld"`, OK, ["hello\nworld"]);
-  test("tab", `id "hello\tworld"`, OK, ["hello\tworld"]);
-  test("", `id "hello{}world"`, OK, ["hello{}world"]);
-  test("", `id "hello\\" \\"world"`, OK, ['hello" "world']);
-  test("", `id "hello\\$world"`, OK, ["hello$world"]);
+  test("string escape 1", `id "hello\\nworld"`, OK, ["hello\nworld"]);
+  test("string escape 2", `id "hello\\tworld"`, OK, ["hello\tworld"]);
+  test("string escape 3", `id "hello{}world"`, OK, ["hello{}world"]);
+  test("string escape 4", `id "hello\\" \\"world"`, OK, ['hello" "world']);
+  test("string escape 5", `id "hello\\$world"`, OK, ["hello$world"]);
 
-  test("", `proc a {setin $global b 3}; a; get b`, OK, ["3"]);
-  test("", `def a 3; proc b {getin $global a}; b`, OK, ["3"]);
+  test("global 1", `proc a {setin $global b 3}; a; get b`, OK, ["3"]);
+  test("global 2", `def a 3; proc b {getin $global a}; b`, OK, ["3"]);
 
   test("", `proc a {put hello}; get a`, OK, ["[proc a {put hello}]"]);
 

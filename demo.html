@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>scl demo</title>
+</head>
+<body>
+  <h1>scl demo</h1>
+  <select id="select"></select>
+  <textarea id="code" style="width: 100%; height: 400px;"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+  <button id="run_btn" title="cmd/ctrl-enter">run</button>
+  <div>Console</div>
+  <pre id="console"></pre>
+  <div>Output</div>
+  <pre id="output"></pre>
+
+  <style>
+    body { font-family: monospace; }
+    #select { display: block; }
+    #run_btn { display: block; margin-bottom: 0.5rem; }
+    #console, #output { margin-left: 2rem; margin-top: 0.5rem; margin-bottom: 0.5rem; }
+  </style>
+
+  <script src="scl.js"></script>
+  <script>
+    let textarea_el = document.getElementById("code");
+    let select_el   = document.getElementById("select");
+    let run_btn_el  = document.getElementById("run_btn");
+    let console_el  = document.getElementById("console");
+    let output_el   = document.getElementById("output");
+
+    function add_option(name, src) {
+      let option = document.createElement("option");
+      option.value = src;
+      option.text = name;
+      select_el.appendChild(option);
+    }
+    add_option("<none>", "");
+    examples.forEach(({name, src}) => add_option(name, src));
+
+    function on_run() {
+      let console_buffer = []
+      put_log = (...args) => { console.log(...args); console_buffer.push(...args); };
+      let src = textarea_el.value;
+      let [out_code, result] = scl_eval(src);
+      output_el.innerText = result;
+      output_el.style.backgroundColor = (out_code === 0) ? "lightgreen" : "pink";
+      console_el.innerText = "";
+      console_buffer.forEach(line => console_el.innerText += line + "\n");
+    }
+
+    run_btn_el.addEventListener("click", on_run);
+    textarea_el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) on_run();
+    });
+    select_el.addEventListener("change", (e) => {
+      textarea_el.value = e.target.value;
+    });
+  </script>
+</body>
+</html>
