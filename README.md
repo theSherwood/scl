@@ -35,7 +35,7 @@ Note that the implementation doesn't horse around with modules or exporting anyt
 
 ## Examples
 
-Look at the tests in the implementation file to see more examples.
+Look at the [demo page](https://thesherwood.github.io/scl/demo.html) or the tests in the implementation file to see more examples.
 
 ### closure
 
